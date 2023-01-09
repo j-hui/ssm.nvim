@@ -29,7 +29,7 @@ function sched.get_current()
 end
 
 function sched.push_process(proc)
-  assert(proc > run_stack:Peek(), "must push processes in the right order")
+  assert(proc < run_stack:Peek(), "must only push higher priority process")
   run_stack:Push(proc)
 end
 
@@ -37,14 +37,17 @@ function sched.enqueue_process(proc)
   run_queue:Add(proc, proc.prio)
 end
 
+--- Dequeue highest priority process scheduled to run.
 function sched.next_process()
   if run_stack:IsEmpty() then
     return run_queue:Pop()
   end
 
-  if run_stack:Peek() > run_queue:peek() then
+  if run_stack:Peek() < run_queue:Peek() then
+    -- run_stack:Peek() has higher priority
     return run_stack:Pop()
   else
+    --- run_queue:Peek() has higher priority
     return run_queue:Pop()
   end
 end
@@ -100,7 +103,7 @@ function Channel:set(k, v)
   local remaining = {}
 
   for p, e in pairs(self._triggers) do
-    if p > cur and (e == true or e[k] == true) then
+    if cur < p and (e == true or e[k] == true) then
       -- Enqueue any lower priority process that is sensitized to:
       -- (1) any update to self._object or (2) updates to self._object[k]
       sched.enqueue_process(p)
@@ -122,9 +125,7 @@ function Channel:last(k)
     -- Look for latest last-updated time on any key
     local t = 0
     for _, v in pairs(self._last) do
-      if v > t then
-        t = v
-      end
+      t = math.max(t, v)
     end
     return t
   else
@@ -211,10 +212,6 @@ function Process:__lt(other)
   return self._prio < other._prio
 end
 
-function Process:__le(other)
-  return self._prio <= other._prio
-end
-
 function Process:channel()
   return self._chan._object
 end
@@ -227,7 +224,7 @@ function Process:call(func, ...)
   -- Give the new process our current priority; give ourselves a new priority,
   -- immediately afterwards.
   local prio = self.prio
-  self.prio = self.prio:insert()
+  self.prio = self.prio:Insert()
 
   local proc = Process:new(func, args, chan, prio)
 
@@ -239,7 +236,7 @@ end
 function Process:spawn(func, ...)
   local args = { ... }
   local chan = Channel:new({ terminated = false })
-  local prio = self.prio:insert()
+  local prio = self.prio:Insert()
 
   local proc = Process:new(func, args, chan, prio)
   sched.push_process(proc)

@@ -27,7 +27,7 @@ local M = {}
 --- The range of labels chosen for priorities.
 ---
 --- Denoted by M in Dietz and Sleator (1987).
---
+---
 --- arena is chosen such that it is the largest number power of 2 on which Lua
 --- can reliably perform integer arithmetic, i.e., less than 1+e14
 --- (see: https://www.lua.org/pil/2.3.html).
@@ -48,10 +48,10 @@ local arena = 2 ^ 46
 --- Priorities are maintained in a circular linked list around a fixed base
 --- priority. This list is doubly-linked to support constant-time deletion.
 ---
----@field label number: value to be compared for constant-time order queries
----@field next Priority: next priority in the linked list
----@field prev Priority: previous priority in the linked list
----@field base BasePriority: the base priority of the total order
+---@field private label number: value to be compared for O(1) time order queries
+---@field private next Priority: next priority in the linked list
+---@field private prev Priority: previous priority in the linked list
+---@field private base BasePriority: the base priority of the total order
 local Priority = {}
 Priority.__index = Priority
 
@@ -63,7 +63,7 @@ Priority.__index = Priority
 --- Note that priorities with different bases cannot be compared.
 ---
 ---@return BasePriority
-function M.new()
+function M.New()
   local base = {
     label = 0, -- chosen arbitrarily, just like the paper
     total = 0,
@@ -76,6 +76,8 @@ function M.new()
 end
 
 --- Whether two priorities are ordered.
+---
+--- a < b means a has a higher priority than b.
 ---
 ---@param a Priority
 ---@param b Priority
@@ -92,17 +94,20 @@ end
 --- Denoted by v_b(r) in Dietz and Sleator (1987), where b is the base and r is
 --- self.
 ---@return Label
+---@private
 function Priority:relative()
   return (self.label - self.base.label) % arena
 end
 
 --- Construct a new priority ordered immediately after self
 ---
+--- That is, p < p:Insert()
+---
 --- Uses Dietz and Sleator's tag-range relabeling algorithm to relabel
 --- successive priorities.
 ---
 ---@return Priority: ordered after self
-function Priority:insert()
+function Priority:Insert()
 
   -- First, relabel successive priorities to evently distribute labels.
   local function weight(p, i)
@@ -153,7 +158,7 @@ end
 --- Delete a priority from its base.
 ---
 --- A deleted priority is no longer valid to use.
-function Priority:delete()
+function Priority:Delete()
   self.base.total = self.base.total - 1
   self.prev.next = self.next
   self.next.prev = self.prev
