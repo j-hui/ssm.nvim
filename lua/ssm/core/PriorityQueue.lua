@@ -4,6 +4,7 @@
 -- - Fewer methods
 -- - Documented using Sumneko annotations.
 -- - Simply uses < instead of comparator (since < maybe overloaded anyway)
+-- - Iterative sifting implementation rather than recursive
 
 local M = {}
 
@@ -26,47 +27,129 @@ M.PriorityQueue = PriorityQueue
 ---@param queue PriorityQueue The queue to sift.
 ---@param index V             The index of the value to sift.
 local function siftUp(queue, index)
-  local parentIndex
-  if index ~= 1 then
-    parentIndex = math.floor(index / 2)
+
+  -- Keep traversing up the tree until either:
+  -- - index is the root of the tree, or
+  -- - index is in its rightful place wrt its parent.
+  while index > 1 do
+
+    -- Compute the parent of index
+    local parentIndex = math.floor(index / 2)
+
     if queue.priorities[parentIndex] < queue.priorities[index] then
-      queue.values[parentIndex], queue.priorities[parentIndex], queue.values[index], queue.priorities[index] =
-      queue.values[index], queue.priorities[index], queue.values[parentIndex], queue.priorities[parentIndex]
-      siftUp(queue, parentIndex)
+
+      -- Swap values/priorities at parentIndex and index
+      queue.values[parentIndex], queue.priorities[parentIndex],
+          queue.values[index], queue.priorities[index] =
+
+      queue.values[index], queue.priorities[index],
+          queue.values[parentIndex], queue.priorities[parentIndex]
+
+      -- Traverse up
+      index = parentIndex
+
+    else
+      -- element at index is at its rightful place, we are done.
+      break
     end
   end
+
+  -- Original recursive implementation:
+  -- if index ~= 1 then
+  --   parentIndex = math.floor(index / 2)
+  --   if queue.priorities[parentIndex] < queue.priorities[index] then
+  --     queue.values[parentIndex], queue.priorities[parentIndex], queue.values[index], queue.priorities[index] =
+  --     queue.values[index], queue.priorities[index], queue.values[parentIndex], queue.priorities[parentIndex]
+  --     siftUp(queue, parentIndex)
+  --   end
+  -- end
 end
 
 ---@package
---- Percolate the value at teh given index down the binary heap.
+--- Percolate the value at the given index down the binary heap.
 ---
 ---@generic     V             The type of values.
 ---@generic     P             The type of priorities.
 ---@param queue PriorityQueue The queue to sift.
 ---@param index V             The index of the value to sift.
 local function siftDown(queue, index)
-  local lcIndex, rcIndex, minIndex
-  lcIndex = index * 2
-  rcIndex = index * 2 + 1
-  if rcIndex > #queue.values then
-    if lcIndex > #queue.values then
-      return
+
+  -- Keep traversing down the tree until either:
+  -- - index is a leaf of the tree, or
+  -- - index is in its rightful place wrt its children.
+  while true do
+
+    -- Pick smallest child of index
+    local minIndex
+
+    -- Indices of children
+    local lcIndex, rcIndex = index * 2, index * 2 + 1
+
+    if rcIndex > #queue.values then -- No right child
+      if lcIndex > #queue.values then -- No left child
+        return -- index is a leaf
+      else
+        minIndex = lcIndex -- Pick only child, left
+      end
     else
-      minIndex = lcIndex
+      -- Note: because we always populate the min heap from left to right
+      -- (i.e., indices are dense), if we have a right child, there will always
+      -- be a left child.
+      --
+      -- In other words, rcIndex > #queue.values implies
+      -- lcIndex > #queue.values, so we don't need to check the latter.
+      if queue.priorities[lcIndex] < queue.priorities[rcIndex] then
+        minIndex = rcIndex -- Right child is smaller
+      else
+        minIndex = lcIndex -- Left child is smaller
+      end
     end
-  else
-    if queue.priorities[lcIndex] < queue.priorities[rcIndex] then
-      minIndex = rcIndex
+
+    if queue.priorities[index] < queue.priorities[minIndex] then
+
+      -- Swap elements at minIndex and index
+      queue.values[minIndex], queue.priorities[minIndex],
+          queue.values[index], queue.priorities[index] =
+
+      queue.values[index], queue.priorities[index],
+          queue.values[minIndex], queue.priorities[minIndex]
+
+      -- Traverse down
+      index = minIndex
     else
-      minIndex = lcIndex
+      -- element at index is at its rightful place, we are done.
+      break
     end
   end
 
-  if queue.priorities[index] < queue.priorities[minIndex] then
-    queue.values[minIndex], queue.priorities[minIndex], queue.values[index], queue.priorities[index] =
-    queue.values[index], queue.priorities[index], queue.values[minIndex], queue.priorities[minIndex]
-    siftDown(queue, minIndex)
-  end
+  -- Original recursive implementation:
+  -- local lcIndex, rcIndex, minIndex
+  -- lcIndex = index * 2
+  -- rcIndex = index * 2 + 1
+  -- if rcIndex > #queue.values then
+  --   if lcIndex > #queue.values then
+  --     return
+  --   else
+  --     minIndex = lcIndex
+  --   end
+  -- else
+  --   if queue.priorities[lcIndex] < queue.priorities[rcIndex] then
+  --     minIndex = rcIndex
+  --   else
+  --     minIndex = lcIndex
+  --   end
+  -- end
+  --
+  -- if queue.priorities[index] < queue.priorities[minIndex] then
+  --
+  --   queue.values[minIndex], queue.priorities[minIndex],
+  --     queue.values[index], queue.priorities[index] =
+  --
+  --   queue.values[index], queue.priorities[index],
+  --     queue.values[minIndex], queue.priorities[minIndex]
+  --
+  --   siftDown(queue, minIndex)
+  -- end
 end
 
 --- Default (empty) constructor for priority queues.
