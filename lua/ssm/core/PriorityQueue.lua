@@ -1,33 +1,23 @@
 -- Adapted from: https://github.com/Roblox/Wiki-Lua-Libraries/blob/master/StandardLibraries/PriorityQueue.lua
---
--- PriorityQueue contains the following functions:
---    :new(comparator) - Create a new PriorityQueue
---      comparator: Uses this function to compare values. If none is given, will assume priorities are numbers and will find highest priority value
---            Comparator should accept two values and return true if a should be further up the queue than b and false otherwise
---    :CreateFromTables(table1, table2, comparator) - Creates a new Priority queue in the format (table1[n] - priority table2[n]) - Tables will remain unchanged
---      table1: The table to use as the values
---      table2: The table to use as the priorities
---      comparator: The comparator to pass to PriorityQueue:new(comparator)
---    :Merge(queue1, queue2) - Creates a new PriorityQueue using the two provided PriorityQueues
---
--- A PriorityQueue object has the following functions:
---    :Add(newValue, priority) - Adds an element to the PriorityQueue
---      newValue: The value to be added
---      priority: The priority to give the newValue
---    :Pop() - Removes the highest priority value from the queue and returns it
---    :Peek() - Returns the highest priority value from the queue but does not remove it, nil if queue is empty
---    :GetAsTable() - Returns the values from the queue as a table
---    :Clear() - Clears all elements from the PriorityQueue
---    :Print(withPriorities) - Prints out all the elements in the PriorityQueue
---      withPriorities: If true, will print out the priorities, if false, will only output the values
---    :Size() - Gets the number of elements in the PriorityQueue
---    :Clone() - Creates and returns a new copy of the PriorityQueue
+-- Notable changes in this adaptation:
+-- - Fewer methods
+-- - Documented using Sumneko annotations.
 
+local M = {}
+
+---@class PriorityQueue
+---
+---@generic V                       The type of values.
+---@generic P                       The type of priorities.
+---@field package values      any   Array of values in binary heap.
+---@field package priorities  any   Array of priorities associated with values.
+---@field package compare     fun(l: any, r: any): boolean Comparator for priorities
 local PriorityQueue = {}
 PriorityQueue.__index = PriorityQueue
 
-local Floor = math.floor
-local function DefaultCompare(a, b)
+M.PriorityQueue = PriorityQueue
+
+local function Defaultcompare(a, b)
   if a < b then
     return true
   else
@@ -35,174 +25,205 @@ local function DefaultCompare(a, b)
   end
 end
 
-local function SiftUp(queue, index)
+---@package
+--- Percolate the value at the given index up the binary heap.
+---
+---@generic     V             The type of values.
+---@generic     P             The type of priorities.
+---@param queue PriorityQueue The queue to sift.
+---@param index V             The index of the value to sift.
+local function siftUp(queue, index)
   local parentIndex
   if index ~= 1 then
-    parentIndex = Floor(index / 2)
-    if queue.Compare(queue.Priorities[parentIndex], queue.Priorities[index]) then
-      queue.Values[parentIndex], queue.Priorities[parentIndex], queue.Values[index], queue.Priorities[index] =
-      queue.Values[index], queue.Priorities[index], queue.Values[parentIndex], queue.Priorities[parentIndex]
-      SiftUp(queue, parentIndex)
+    parentIndex = math.floor(index / 2)
+    if queue.compare(queue.priorities[parentIndex], queue.priorities[index]) then
+      queue.values[parentIndex], queue.priorities[parentIndex], queue.values[index], queue.priorities[index] =
+      queue.values[index], queue.priorities[index], queue.values[parentIndex], queue.priorities[parentIndex]
+      siftUp(queue, parentIndex)
     end
   end
 end
 
-local function SiftDown(queue, index)
+---@package
+--- Percolate the value at teh given index down the binary heap.
+---
+---@generic     V             The type of values.
+---@generic     P             The type of priorities.
+---@param queue PriorityQueue The queue to sift.
+---@param index V             The index of the value to sift.
+local function siftDown(queue, index)
   local lcIndex, rcIndex, minIndex
   lcIndex = index * 2
   rcIndex = index * 2 + 1
-  if rcIndex > #queue.Values then
-    if lcIndex > #queue.Values then
+  if rcIndex > #queue.values then
+    if lcIndex > #queue.values then
       return
     else
       minIndex = lcIndex
     end
   else
-    if not queue.Compare(queue.Priorities[lcIndex], queue.Priorities[rcIndex]) then
+    if not queue.compare(queue.priorities[lcIndex], queue.priorities[rcIndex]) then
       minIndex = lcIndex
     else
       minIndex = rcIndex
     end
   end
 
-  if queue.Compare(queue.Priorities[index], queue.Priorities[minIndex]) then
-    queue.Values[minIndex], queue.Priorities[minIndex], queue.Values[index], queue.Priorities[index] =
-    queue.Values[index], queue.Priorities[index], queue.Values[minIndex], queue.Priorities[minIndex]
-    SiftDown(queue, minIndex)
+  if queue.compare(queue.priorities[index], queue.priorities[minIndex]) then
+    queue.values[minIndex], queue.priorities[minIndex], queue.values[index], queue.priorities[index] =
+    queue.values[index], queue.priorities[index], queue.values[minIndex], queue.priorities[minIndex]
+    siftDown(queue, minIndex)
   end
 end
 
-function PriorityQueue:new(comparator)
+--- Construct a new priority queue.
+---
+---@generic V               The type of values.
+---@generic P               The type of priorities.
+---@return  PriorityQueue   The newly constructed queue.
+function PriorityQueue.New(comparator)
   local newQueue = {}
-  setmetatable(newQueue, self)
+
   if comparator then
-    newQueue.Compare = comparator
+    newQueue.compare = comparator
   else
-    newQueue.Compare = DefaultCompare
+    newQueue.compare = Defaultcompare
   end
 
-  newQueue.Values = {}
-  newQueue.Priorities = {}
+  newQueue.values = {}
+  newQueue.priorities = {}
+
+  setmetatable(newQueue, PriorityQueue)
 
   return newQueue
 end
 
-function PriorityQueue:Add(newValue, priority)
-  table.insert(self.Values, newValue)
-  table.insert(self.Priorities, priority)
+--- Create a copy of self, referring to the same values and priorities.
+---
+---@generic V               The type of values.
+---@generic P               The type of priorities.
+---@return  PriorityQueue   A copy of the queue.
+function PriorityQueue:Clone()
+  local newQueue = PriorityQueue.New(self.compare)
+  for i = 1, #self.values do
+    table.insert(newQueue.values, self.values[i])
+    table.insert(newQueue.priorities, self.priorities[i])
+  end
+  return newQueue
+end
 
-  if #self.Values <= 1 then
+--- Add a new value to a priority queue with a given priority.
+---
+---@generic V             The type of values.
+---@generic P             The type of priorities.
+---@param   newValue V    The value to add to self.
+---@param   priority P    The priority associated with newValue.
+function PriorityQueue:Add(newValue, priority)
+  table.insert(self.values, newValue)
+  table.insert(self.priorities, priority)
+
+  if #self.values <= 1 then
     return
   end
 
-  SiftUp(self, #self.Values)
+  siftUp(self, #self.values)
 end
 
+--- Pop the highest (least) priority item from the queue.
+---
+---@generic V       The type of values.
+---@generic P       The type of priorities.
+---@return  V|nil   The highest (least) priority item.
+---@return  P|nil   The priority of the highest (least) priority item.
 function PriorityQueue:Pop()
-  if #self.Values <= 0 then
+  if #self.values <= 0 then
     return nil, nil
   end
 
-  local returnVal, returnPriority = self.Values[1], self.Priorities[1]
-  self.Values[1], self.Priorities[1] = self.Values[#self.Values], self.Priorities[#self.Priorities]
-  table.remove(self.Values, #self.Values)
-  table.remove(self.Priorities, #self.Priorities)
-  if #self.Values > 0 then
-    SiftDown(self, 1)
+  local returnVal, returnPriority = self.values[1], self.priorities[1]
+  self.values[1], self.priorities[1] = self.values[#self.values], self.priorities[#self.priorities]
+  table.remove(self.values, #self.values)
+  table.remove(self.priorities, #self.priorities)
+  if #self.values > 0 then
+    siftDown(self, 1)
   end
 
   return returnVal, returnPriority
 end
 
+--- Peek at the highest (least) priority item in the queue.
+---
+--- The queue is left unmodified.
+---
+---@generic V       The type of values.
+---@generic P       The type of priorities.
+---@return  V|nil   The highest (least) priority item.
+---@return  P|nil   The priority of the highest (least) priority item.
 function PriorityQueue:Peek()
-  if #self.Values > 0 then
-    return self.Values[1], self.Priorities[1]
+  if #self.values > 0 then
+    return self.values[1], self.priorities[1]
   else
     return nil, nil
   end
 end
 
-function PriorityQueue:GetAsTable()
-  if not self.Values or #self.Values < 1 then
+--- Export the binary heap as an array.
+---
+---@generic V         The type of values.
+---@generic P         The type of priorities.
+---@return  V[]|nil   An array of values.
+---@return  P[]|nil   An array of priorities.
+function PriorityQueue:AsTable()
+  if not self.values or #self.values < 1 then
     return nil, nil
   end
 
   local vals = {}
   local pris = {}
 
-  for i = 1, #self.Values do
-    table.insert(vals, self.Values[i])
-    table.insert(pris, self.Priorities[i])
+  for i = 1, #self.values do
+    table.insert(vals, self.values[i])
+    table.insert(pris, self.priorities[i])
   end
 
   return vals, pris
 end
 
-function PriorityQueue:Clear()
-  for k in pairs(self.Values) do
-    self.Values[k] = nil
+--- Render a priority queue as human-readable string.
+---
+---@param   withPriorities  boolean|nil   Whether to render priorities.
+---@return  string                        The queue formatted as a string.
+function PriorityQueue:ToString(withPriorities)
+  local out = ""
+  for i = 1, #self.values do
+    out = out .. tostring(self.values[i])
+    if withPriorities then
+      out = out .. "(" .. tostring(self.priorities[i]) .. ")"
+    end
+    out = out .. " "
   end
-  for k in pairs(self.Priorities) do
-    self.Priorities[k] = nil
-  end
-  for k in pairs(self) do
-    self[k] = nil
-  end
+  return out
 end
 
-function PriorityQueue:Print(withPriorities)
-  if not withPriorities then
-    local out = ""
-    for i = 1, #self.Values do
-      out = out .. tostring(self.Values[i]) .. " "
-    end
-    print(out)
-  else
-    local out = ""
-    for i = 1, #self.Values do
-      out = out .. tostring(self.Values[i]) .. "(" .. tostring(self.Priorities[i]) .. ") "
-    end
-    print(out)
-  end
-end
-
+--- Obtain the number of values stored in the priority queue.
+---
+---@return integer  The number of elements stored in the priority queue.
 function PriorityQueue:Size()
-  return #self.Values
+  return #self.values
 end
 
-function PriorityQueue:Clone()
-  local newQueue = PriorityQueue:new(self.Compare)
-  for i = 1, #self.Values do
-    table.insert(newQueue.Values, self.Values[i])
-    table.insert(newQueue.Priorities, self.Priorities[i])
-  end
-  return newQueue
+--- String metamethod.
+---
+---@return string
+function PriorityQueue:__str()
+  return self:ToString()
 end
 
--- Functions that are not self-referential
-function PriorityQueue:CreateFromTables(table1, table2, comparator)
-  local newQueue = PriorityQueue:new(comparator)
-  for i = #table1, 1, -1 do
-    if table2[i] then
-      newQueue:Add(table1[i], table2[i])
-    else
-      return
-    end
-  end
+--- Length metamethod.
+---
+---@return integer
+function PriorityQueue:__len()
+  return self:Size()
 end
 
-function PriorityQueue:Merge(queue1, queue2, comparator)
-  if not comparator then
-    comparator = queue1.Compare or queue2.Compare
-  end
-  local newQueue = PriorityQueue:new(comparator)
-  for i = #queue1.Values, 1, -1 do
-    newQueue:Add(queue1.Values[i], queue1.Priorities[i])
-  end
-  for i = #queue2.Values, 1, -1 do
-    newQueue:Add(queue2.Values[i], queue2.Priorities[i])
-  end
-  return newQueue
-end
-
-return PriorityQueue
+return M
