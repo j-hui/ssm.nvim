@@ -1,7 +1,9 @@
 -- Adapted from: https://github.com/Roblox/Wiki-Lua-Libraries/blob/master/StandardLibraries/PriorityQueue.lua
+--
 -- Notable changes in this adaptation:
 -- - Fewer methods
 -- - Documented using Sumneko annotations.
+-- - Simply uses < instead of comparator (since < maybe overloaded anyway)
 
 local M = {}
 
@@ -11,19 +13,10 @@ local M = {}
 ---@generic P                       The type of priorities.
 ---@field package values      any   Array of values in binary heap.
 ---@field package priorities  any   Array of priorities associated with values.
----@field package compare     fun(l: any, r: any): boolean Comparator for priorities
 local PriorityQueue = {}
 PriorityQueue.__index = PriorityQueue
 
 M.PriorityQueue = PriorityQueue
-
-local function Defaultcompare(a, b)
-  if a < b then
-    return true
-  else
-    return false
-  end
-end
 
 ---@package
 --- Percolate the value at the given index up the binary heap.
@@ -36,7 +29,7 @@ local function siftUp(queue, index)
   local parentIndex
   if index ~= 1 then
     parentIndex = math.floor(index / 2)
-    if queue.compare(queue.priorities[parentIndex], queue.priorities[index]) then
+    if queue.priorities[parentIndex] < queue.priorities[index] then
       queue.values[parentIndex], queue.priorities[parentIndex], queue.values[index], queue.priorities[index] =
       queue.values[index], queue.priorities[index], queue.values[parentIndex], queue.priorities[parentIndex]
       siftUp(queue, parentIndex)
@@ -62,49 +55,36 @@ local function siftDown(queue, index)
       minIndex = lcIndex
     end
   else
-    if not queue.compare(queue.priorities[lcIndex], queue.priorities[rcIndex]) then
-      minIndex = lcIndex
-    else
+    if queue.priorities[lcIndex] < queue.priorities[rcIndex] then
       minIndex = rcIndex
+    else
+      minIndex = lcIndex
     end
   end
 
-  if queue.compare(queue.priorities[index], queue.priorities[minIndex]) then
+  if queue.priorities[index] < queue.priorities[minIndex] then
     queue.values[minIndex], queue.priorities[minIndex], queue.values[index], queue.priorities[index] =
     queue.values[index], queue.priorities[index], queue.values[minIndex], queue.priorities[minIndex]
     siftDown(queue, minIndex)
   end
 end
 
---- Construct a new priority queue.
+--- Default (empty) constructor for priority queues.
 ---
 ---@generic V               The type of values.
 ---@generic P               The type of priorities.
 ---@return  PriorityQueue   The newly constructed queue.
-function PriorityQueue.New(comparator)
-  local newQueue = {}
-
-  if comparator then
-    newQueue.compare = comparator
-  else
-    newQueue.compare = Defaultcompare
-  end
-
-  newQueue.values = {}
-  newQueue.priorities = {}
-
-  setmetatable(newQueue, PriorityQueue)
-
-  return newQueue
+function PriorityQueue.New()
+  return setmetatable({ values = {}, priorities = {} }, PriorityQueue)
 end
 
---- Create a copy of self, referring to the same values and priorities.
+--- Copy constructor for priority queues.
 ---
 ---@generic V               The type of values.
 ---@generic P               The type of priorities.
 ---@return  PriorityQueue   A copy of the queue.
 function PriorityQueue:Clone()
-  local newQueue = PriorityQueue.New(self.compare)
+  local newQueue = PriorityQueue.New()
   for i = 1, #self.values do
     table.insert(newQueue.values, self.values[i])
     table.insert(newQueue.priorities, self.priorities[i])
