@@ -34,7 +34,7 @@ M.PriorityQueue = PriorityQueue
 ---@generic     P             The type of priorities.
 ---@param queue PriorityQueue The queue to sift.
 ---@param current V           The index of the value to sift.
-local function sift_up(queue, current)
+local function siftUp(queue, current)
 
   -- Keep traversing up the tree until either:
   -- - current is the root of the tree, or
@@ -70,7 +70,7 @@ end
 ---@generic     P             The type of priorities.
 ---@param queue PriorityQueue The queue to sift.
 ---@param current V           The index of the value to sift.
-local function sift_down(queue, current)
+local function siftDown(queue, current)
 
   -- Keep traversing down the tree until either:
   -- - current is a leaf of the tree, or
@@ -152,7 +152,7 @@ function PriorityQueue:Add(val, prio)
   table.insert(self.prios, prio)
 
   if #self.values > 1 then
-    sift_up(self, #self.values)
+    siftUp(self, #self.values)
   end
 end
 
@@ -175,7 +175,7 @@ function PriorityQueue:Pop()
   table.remove(self.prios, #self.prios)
 
   if #self.values > 1 then
-    sift_down(self, 1)
+    siftDown(self, 1)
   end
 
   return val, prio
@@ -221,13 +221,13 @@ end
 
 --- Render a priority queue as human-readable string.
 ---
----@param   with_priorities  boolean|nil  Whether to render priorities.
+---@param   withPriorities  boolean|nil   Whether to render priorities.
 ---@return  string                        The queue formatted as a string.
-function PriorityQueue:ToString(with_priorities)
+function PriorityQueue:ToString(withPriorities)
   local out = ""
   for i = 1, #self.values do
     out = out .. tostring(self.values[i])
-    if with_priorities then
+    if withPriorities then
       out = out .. "(" .. tostring(self.prios[i]) .. ")"
     end
     out = out .. " "
