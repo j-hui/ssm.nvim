@@ -5,15 +5,23 @@
 -- - Documented using Sumneko annotations.
 -- - Simply uses < instead of comparator (since < maybe overloaded anyway)
 -- - Iterative sifting implementation rather than recursive
+-- - If x < y, x has the higher priority (rather than the other way around)
 
 local M = {}
 
 ---@class PriorityQueue
 ---
----@generic V                       The type of values.
----@generic P                       The type of priorities.
----@field package values      any   Array of values in binary heap.
----@field package priorities  any   Array of priorities associated with values.
+--- Elements are compared according to their priorities; when x < y, x has
+--- the higher priority (though we call it the "least" element).  In code:
+---
+---     local x = pq:Pop()
+---     local y = pq:Pop()
+---     assert(x < y)
+---
+---@generic V                     The type of values.
+---@generic P                     The type of priorities.
+---@field package values  any[]   Elements' values in binary heap.
+---@field package prios   any[]   Elements' priorities in binary heap.
 local PriorityQueue = {}
 PriorityQueue.__index = PriorityQueue
 
@@ -25,44 +33,34 @@ M.PriorityQueue = PriorityQueue
 ---@generic     V             The type of values.
 ---@generic     P             The type of priorities.
 ---@param queue PriorityQueue The queue to sift.
----@param index V             The index of the value to sift.
-local function siftUp(queue, index)
+---@param current V           The index of the value to sift.
+local function siftUp(queue, current)
 
   -- Keep traversing up the tree until either:
-  -- - index is the root of the tree, or
-  -- - index is in its rightful place wrt its parent.
-  while index > 1 do
+  -- - current is the root of the tree, or
+  -- - current is in its rightful place wrt its parent.
+  while current > 1 do
 
-    -- Compute the parent of index
-    local parentIndex = math.floor(index / 2)
+    -- Compute the parent of current
+    local parent = math.floor(current / 2)
 
-    if queue.priorities[parentIndex] < queue.priorities[index] then
+    if queue.prios[current] < queue.prios[parent] then
 
-      -- Swap values/priorities at parentIndex and index
-      queue.values[parentIndex], queue.priorities[parentIndex],
-          queue.values[index], queue.priorities[index] =
+      -- Swap values/priorities at parent and current
+      queue.values[parent], queue.prios[parent],
+          queue.values[current], queue.prios[current] =
 
-      queue.values[index], queue.priorities[index],
-          queue.values[parentIndex], queue.priorities[parentIndex]
+      queue.values[current], queue.prios[current],
+          queue.values[parent], queue.prios[parent]
 
-      -- Traverse up
-      index = parentIndex
+      -- Traverse up the tree
+      current = parent
 
     else
-      -- element at index is at its rightful place, we are done.
+      -- parent < current, so current is at its rightful place.
       break
     end
   end
-
-  -- Original recursive implementation:
-  -- if index ~= 1 then
-  --   parentIndex = math.floor(index / 2)
-  --   if queue.priorities[parentIndex] < queue.priorities[index] then
-  --     queue.values[parentIndex], queue.priorities[parentIndex], queue.values[index], queue.priorities[index] =
-  --     queue.values[index], queue.priorities[index], queue.values[parentIndex], queue.priorities[parentIndex]
-  --     siftUp(queue, parentIndex)
-  --   end
-  -- end
 end
 
 ---@package
@@ -71,85 +69,53 @@ end
 ---@generic     V             The type of values.
 ---@generic     P             The type of priorities.
 ---@param queue PriorityQueue The queue to sift.
----@param index V             The index of the value to sift.
-local function siftDown(queue, index)
+---@param current V           The index of the value to sift.
+local function siftDown(queue, current)
 
   -- Keep traversing down the tree until either:
-  -- - index is a leaf of the tree, or
-  -- - index is in its rightful place wrt its children.
+  -- - current is a leaf of the tree, or
+  -- - current is in its rightful place wrt its children.
   while true do
 
-    -- Pick smallest child of index
-    local minIndex
+    -- Pick child with the higher (lower) priority.
+    -- That is, if we have two children l and r and r < l, pick r.
+    --
+    -- Note that because we always populate the min heap from left to right
+    -- (i.e., indices are dense), if we have a right child, there will always be
+    -- a left child. In other words, if there is no left child, there is no need
+    -- to check for a right child.
 
-    -- Indices of children
-    local lcIndex, rcIndex = index * 2, index * 2 + 1
+    -- Start with the left child
+    local child = current * 2
 
-    if rcIndex > #queue.values then -- No right child
-      if lcIndex > #queue.values then -- No left child
-        return -- index is a leaf
-      else
-        minIndex = lcIndex -- Pick only child, left
-      end
-    else
-      -- Note: because we always populate the min heap from left to right
-      -- (i.e., indices are dense), if we have a right child, there will always
-      -- be a left child.
-      --
-      -- In other words, rcIndex > #queue.values implies
-      -- lcIndex > #queue.values, so we don't need to check the latter.
-      if queue.priorities[lcIndex] < queue.priorities[rcIndex] then
-        minIndex = rcIndex -- Right child is smaller
-      else
-        minIndex = lcIndex -- Left child is smaller
-      end
+    if child > #queue.values then
+      -- No left child; current is a leaf
+      break
     end
 
-    if queue.priorities[index] < queue.priorities[minIndex] then
+    if child + 1 > #queue.values and -- There is also a right child
+        queue.prios[child] < queue.prios[child + 1] --  with higher priority
+    then
+      -- Pick right child instead
+      child = child + 1
+    end
 
-      -- Swap elements at minIndex and index
-      queue.values[minIndex], queue.priorities[minIndex],
-          queue.values[index], queue.priorities[index] =
+    if queue.prios[child] < queue.prios[current] then
 
-      queue.values[index], queue.priorities[index],
-          queue.values[minIndex], queue.priorities[minIndex]
+      -- Swap elements at child and current
+      queue.values[child], queue.prios[child],
+          queue.values[current], queue.prios[current] =
 
-      -- Traverse down
-      index = minIndex
+      queue.values[current], queue.prios[current],
+          queue.values[child], queue.prios[child]
+
+      -- Traverse down the tree
+      current = child
     else
-      -- element at index is at its rightful place, we are done.
+      -- current < child, so current is at its rightful place.
       break
     end
   end
-
-  -- Original recursive implementation:
-  -- local lcIndex, rcIndex, minIndex
-  -- lcIndex = index * 2
-  -- rcIndex = index * 2 + 1
-  -- if rcIndex > #queue.values then
-  --   if lcIndex > #queue.values then
-  --     return
-  --   else
-  --     minIndex = lcIndex
-  --   end
-  -- else
-  --   if queue.priorities[lcIndex] < queue.priorities[rcIndex] then
-  --     minIndex = rcIndex
-  --   else
-  --     minIndex = lcIndex
-  --   end
-  -- end
-  --
-  -- if queue.priorities[index] < queue.priorities[minIndex] then
-  --
-  --   queue.values[minIndex], queue.priorities[minIndex],
-  --     queue.values[index], queue.priorities[index] =
-  --
-  --   queue.values[index], queue.priorities[index],
-  --     queue.values[minIndex], queue.priorities[minIndex]
-  --
-  --   siftDown(queue, minIndex)
-  -- end
 end
 
 --- Default (empty) constructor for priority queues.
@@ -158,7 +124,7 @@ end
 ---@generic P               The type of priorities.
 ---@return  PriorityQueue   The newly constructed queue.
 function PriorityQueue.New()
-  return setmetatable({ values = {}, priorities = {} }, PriorityQueue)
+  return setmetatable({ values = {}, prios = {} }, PriorityQueue)
 end
 
 --- Copy constructor for priority queues.
@@ -170,26 +136,24 @@ function PriorityQueue:Clone()
   local newQueue = PriorityQueue.New()
   for i = 1, #self.values do
     table.insert(newQueue.values, self.values[i])
-    table.insert(newQueue.priorities, self.priorities[i])
+    table.insert(newQueue.prios, self.prios[i])
   end
   return newQueue
 end
 
 --- Add a new value to a priority queue with a given priority.
 ---
----@generic V             The type of values.
----@generic P             The type of priorities.
----@param   newValue V    The value to add to self.
----@param   priority P    The priority associated with newValue.
-function PriorityQueue:Add(newValue, priority)
-  table.insert(self.values, newValue)
-  table.insert(self.priorities, priority)
+---@generic V         The type of values.
+---@generic P         The type of priorities.
+---@param   val   V   The value to add to self.
+---@param   prio  P   The priority associated with newValue.
+function PriorityQueue:Add(val, prio)
+  table.insert(self.values, val)
+  table.insert(self.prios, prio)
 
-  if #self.values <= 1 then
-    return
+  if #self.values > 1 then
+    siftUp(self, #self.values)
   end
-
-  siftUp(self, #self.values)
 end
 
 --- Pop the highest (least) priority item from the queue.
@@ -203,15 +167,18 @@ function PriorityQueue:Pop()
     return nil, nil
   end
 
-  local returnVal, returnPriority = self.values[1], self.priorities[1]
-  self.values[1], self.priorities[1] = self.values[#self.values], self.priorities[#self.priorities]
+  local val, prio = self.values[1], self.prios[1]
+
+  -- Move last element to root
+  self.values[1], self.prios[1] = self.values[#self.values], self.prios[#self.prios]
   table.remove(self.values, #self.values)
-  table.remove(self.priorities, #self.priorities)
-  if #self.values > 0 then
+  table.remove(self.prios, #self.prios)
+
+  if #self.values > 1 then
     siftDown(self, 1)
   end
 
-  return returnVal, returnPriority
+  return val, prio
 end
 
 --- Peek at the highest (least) priority item in the queue.
@@ -223,10 +190,10 @@ end
 ---@return  V|nil   The highest (least) priority item.
 ---@return  P|nil   The priority of the highest (least) priority item.
 function PriorityQueue:Peek()
-  if #self.values > 0 then
-    return self.values[1], self.priorities[1]
-  else
+  if #self.values <= 0 then
     return nil, nil
+  else
+    return self.values[1], self.prios[1]
   end
 end
 
@@ -246,7 +213,7 @@ function PriorityQueue:AsTable()
 
   for i = 1, #self.values do
     table.insert(vals, self.values[i])
-    table.insert(pris, self.priorities[i])
+    table.insert(pris, self.prios[i])
   end
 
   return vals, pris
@@ -261,7 +228,7 @@ function PriorityQueue:ToString(withPriorities)
   for i = 1, #self.values do
     out = out .. tostring(self.values[i])
     if withPriorities then
-      out = out .. "(" .. tostring(self.priorities[i]) .. ")"
+      out = out .. "(" .. tostring(self.prios[i]) .. ")"
     end
     out = out .. " "
   end
