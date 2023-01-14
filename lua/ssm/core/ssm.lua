@@ -16,8 +16,8 @@ end
 
 -- TID-indexed table of running processes
 local proc_table = {}
-local run_stack = require("ssm.core.Stack"):New()
-local run_queue = require("ssm.core.PriorityQueue"):New()
+local run_stack = require("ssm.core.Stack").Stack.New()
+local run_queue = require("ssm.core.PriorityQueue").PriorityQueue.New()
 
 function sched.get_process(tid)
   return proc_table[tid]

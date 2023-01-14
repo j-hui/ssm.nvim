@@ -1,5 +1,7 @@
 --- A stack implementation whose interface guarantees constant-time operations.
 
+local M = {}
+
 ---@class Stack
 ---
 --- A Stack is an array coupled with a length (i.e., a vector).
@@ -10,15 +12,17 @@
 local Stack = {}
 Stack.__index = Stack
 
+M.Stack = Stack
+
 --- Construct an empty stack.
 ---
 ---@generic T
 ---@return Stack
-function Stack:New()
+function Stack.New()
   return setmetatable({
     len = 0,
     stack = {},
-  }, self)
+  }, Stack)
 end
 
 --- Push an item onto the stack.
@@ -72,4 +76,4 @@ function Stack:__len()
   return self.len
 end
 
-return Stack
+return M
