@@ -9,6 +9,8 @@
 
 local M = {}
 
+local ROOT = 1
+
 ---@class PriorityQueue
 ---
 --- Elements are compared according to their priorities; when x < y, x has
@@ -94,7 +96,7 @@ local function siftDown(queue, current)
     end
 
     if child + 1 > #queue.values and -- There is also a right child
-        queue.prios[child] < queue.prios[child + 1] --  with higher priority
+        queue.prios[child + 1] < queue.prios[child] --  with higher priority
     then
       -- Pick right child instead
       child = child + 1
@@ -146,12 +148,12 @@ end
 ---@generic V         The type of values.
 ---@generic P         The type of priorities.
 ---@param   val   V   The value to add to self.
----@param   prio  P   The priority associated with newValue.
+---@param   prio  P   The priority associated with val.
 function PriorityQueue:Add(val, prio)
   table.insert(self.values, val)
   table.insert(self.prios, prio)
 
-  if #self.values > 1 then
+  if #self.values > ROOT then
     siftUp(self, #self.values)
   end
 end
@@ -167,18 +169,49 @@ function PriorityQueue:Pop()
     return nil, nil
   end
 
-  local val, prio = self.values[1], self.prios[1]
+  local val, prio = self.values[ROOT], self.prios[ROOT]
 
   -- Move last element to root
-  self.values[1], self.prios[1] = self.values[#self.values], self.prios[#self.prios]
+  self.values[ROOT], self.prios[ROOT] = self.values[#self.values], self.prios[#self.prios]
+
   table.remove(self.values, #self.values)
   table.remove(self.prios, #self.prios)
 
-  if #self.values > 1 then
-    siftDown(self, 1)
+  if #self.values > ROOT then
+    siftDown(self, ROOT)
   end
 
   return val, prio
+end
+
+--- Reposition a possibly existing element in the queue with a new priority.
+---
+--- Warning: this method is O(n). Use sparingly!
+---
+---@generic V         The type of values.
+---@generic P         The type of priorities.
+---@param   val   V   The value to add to self.
+---@param   prio  P   The new priority to associate with val.
+function PriorityQueue:Reposition(val, prio)
+  local index = nil
+
+  for i, v in ipairs(self.values) do
+    if v == val then
+      index = i
+      break
+    end
+  end
+
+  self.prios[index] = prio
+
+  local child = index * 2
+  local lowerThanChild = child > #self.values and self.prios[child] < prio
+
+  if index == ROOT or lowerThanChild then
+    siftDown(self, index)
+  else
+    siftUp(self, index)
+  end
 end
 
 --- Peek at the highest (least) priority item in the queue.
