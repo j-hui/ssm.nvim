@@ -14,8 +14,6 @@ local Channel = require("ssm.core.Channel")
 local Process = {}
 Process.__index = Process
 
-M.Process = Process
-
 --- Construct a new Process.
 ---
 ---@param func  fun(any): any   Function to execute.
@@ -23,7 +21,7 @@ M.Process = Process
 ---@param chan  Channel         Process status channel.
 ---@param prio  Priority        Priority of the process.
 ---@return      Process         The newly constructed process.
-function Process.new(func, args, chan, prio)
+local function newProcess(func, args, chan, prio)
   local proc = { chan = chan, prio = prio }
 
   -- proc becomes the self of func
@@ -68,7 +66,7 @@ function Process:call(func, ...)
   local prio = self.prio
   self.prio = self.prio:Insert()
 
-  local proc = Process.new(func, args, chan, prio)
+  local proc = newProcess(func, args, chan, prio)
 
   sched.registerProcess(proc)
   sched.pushProcess(self)
@@ -81,7 +79,7 @@ function Process:spawn(func, ...)
   local chan = Channel.Channel.new({ terminated = false })
   local prio = self.prio:Insert()
 
-  local proc = Process.new(func, args, chan, prio)
+  local proc = newProcess(func, args, chan, prio)
 
   sched.registerProcess(proc)
   sched.pushProcess(proc)
