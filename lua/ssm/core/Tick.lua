@@ -3,6 +3,7 @@ local M = {}
 local sched = require("ssm.core.sched")
 local Process = require("ssm.core.Process")
 local Time = require("ssm.core.Time")
+local Channel = require("ssm.core.Channel")
 
 function Tick()
   local now = sched.advanceTime()
@@ -12,7 +13,7 @@ function Tick()
   end
 
   for c in sched.scheduledEvents() do
-    c:update()
+    Channel.update(c)
   end
 
   for p in sched.scheduledProcesses() do

@@ -1,7 +1,7 @@
 local M = {}
 
 local sched = require("ssm.core.sched")
-local channel = require("ssm.core.Channel")
+local Channel = require("ssm.core.Channel")
 
 ---@class Process
 ---
@@ -32,11 +32,11 @@ function Process.new(func, args, chan, prio)
 
     -- Set return values
     for i, v in ipairs(r) do
-      chan:get()[i] = v
+      Channel.getTable(chan)[i] = v
     end
 
     -- Convey termination
-    chan:get().terminated = true
+    Channel.getTable(chan).terminated = true
 
     -- Delete process from process table.
     sched.unregisterProcess(proc.cont)
@@ -58,17 +58,10 @@ function Process.__lt(self, other)
   return self.prio < other.prio
 end
 
---- Obtain the return channel of the process.
----
----@return CTable
-function Process:channel()
-  return self.chan:get()
-end
-
 function Process:call(func, ...)
   local args = { ... }
 
-  local chan = channel.Channel.new({ terminated = false })
+  local chan = Channel.Channel.new({ terminated = false })
 
   -- Give the new process our current priority; give ourselves a new priority,
   -- immediately afterwards.
@@ -85,7 +78,7 @@ end
 
 function Process:spawn(func, ...)
   local args = { ... }
-  local chan = channel.Channel.new({ terminated = false })
+  local chan = Channel.Channel.new({ terminated = false })
   local prio = self.prio:Insert()
 
   local proc = Process.new(func, args, chan, prio)
@@ -110,15 +103,15 @@ function Process:wait(...)
   local os = { ... }
 
   for _, o in ipairs(os) do
-    if channel.is_channel(o) then
+    if Channel.is_channel(o) then
       -- self:wait(..., o, ...), where o is a Channel object,
       -- i.e., wait on any update to o.
-      channel.sensitize(o, self)
+      Channel.sensitize(o, self)
     else
       -- self:wait(..., {o, k1 ... kn}, ...), where o is a Channel object and
       -- k1 ... kn are keys, i.e., wait on updates to o[k1] ... o[kn].
       for _, k in iiter, o, 1 do
-        channel.sensitize(o[1], self, k)
+        Channel.sensitize(o[1], self, k)
       end
     end
   end
@@ -127,10 +120,10 @@ function Process:wait(...)
 
   -- Desensitize from all objects
   for _, o in ipairs(os) do
-    if channel.is_channel(o) then
-      channel.desensitize(o, self)
+    if Channel.is_channel(o) then
+      Channel.desensitize(o, self)
     else
-      channel.desensitize(o[1], self)
+      Channel.desensitize(o[1], self)
     end
   end
 end
@@ -142,7 +135,7 @@ end
 ---@param k any       Key of t to perform update on.
 ---@param v any       Value to assign to t[k].
 function Process:after(d, t, k, v)
-  channel.after(t, d, k, v)
+  Channel.after(t, d, k, v)
 end
 
 --- Resume execution of a process.

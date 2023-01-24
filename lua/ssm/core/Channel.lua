@@ -34,7 +34,7 @@ end
 ---@param o   table     The table to check.
 ---@return    boolean   Whether o has a channel attached.
 function M.hasChannel(o)
-  return getmetatable(o) == Channel
+  return getmetatable(getChannel(o)) == Channel
 end
 
 --- Construct a new Channel whose table is initialized with init.
@@ -75,20 +75,24 @@ end
 
 --- Obtain the table a channel is attached it.
 ---
----@return CTable
-function Channel:get()
+---@param self  Channel
+---@return      CTable
+function M.getTable(self)
   return self.table
 end
 
 --- Obtain the earliest time a channel table is scheduled for an update.
 ---
----@return Time   The logical timestamp of the next modification.
-function Channel:nextUpdateTime()
+---@param self  Channel
+---@return      Time
+function M.nextUpdateTime(self)
   return self.earliest
 end
 
 --- Perform delayed update on a channel table, and schedule sensitive processes.
-function Channel:update()
+---
+---@param self Channel
+function M.update(self)
   local nextEarliest = Time.NEVER
 
   assert(self.earliest == sched.logicalTime(), "Updating at the right time")
