@@ -2,47 +2,72 @@ local M = {}
 
 local sched = require("ssm.core.sched")
 local Channel = require("ssm.core.Channel")
+local Priority = require("ssm.core.Priority")
+local dbg = require("ssm.core.dbg")
 
 ---@class Process
 ---
 --- Object to store metadata for running thread. Also the subject of self within
 --- SSM routines.
 ---
----@field cont thread
----@field prio Priority
----@field chan Channel
+---@field package cont thread
+---@field package prio Priority
+---@field package chan Channel
+---@field private name string
 local Process = {}
 Process.__index = Process
 
+function Process:__tostring()
+  return self.name
+end
+
 --- Construct a new Process.
 ---
----@param func  fun(any): any   Function to execute.
+---@param func  fun(any): any   Function to execute in process.
 ---@param args  any[]           Table of arguments to routine.
----@param chan  Channel         Process status channel.
+---@param chan  Channel|nil     Process status channel.
 ---@param prio  Priority        Priority of the process.
 ---@return      Process         The newly constructed process.
 local function newProcess(func, args, chan, prio)
-  local proc = { chan = chan, prio = prio }
+  local proc = { chan = chan, prio = prio, name = "p" .. dbg.fresh() }
 
   -- proc becomes the self of func
   proc.cont = coroutine.create(function()
-    local r = { func(proc, unpack(args)) }
-
-    -- Set return values
-    for i, v in ipairs(r) do
-      Channel.getTable(chan)[i] = v
+    local function pdbg(...)
+      dbg("Process: " .. tostring(proc), ...)
     end
 
-    -- Convey termination
-    Channel.getTable(chan).terminated = true
+    pdbg("Created proc for function: " .. tostring(func),
+      "Termination channel: " .. tostring(proc.chan))
 
+    local r = { func(proc, unpack(args)) }
+
+
+    if proc.chan then
+
+      for i, v in ipairs(r) do
+        pdbg("Terminated.", "Assigning return value: [" .. tostring(i) .. "] " .. tostring(v))
+        proc.chan[i] = v
+      end
+
+      -- Convey termination
+      pdbg("Terminated.", "Assigning to termination channel (" .. tostring(proc.chan) .. ")")
+      proc.chan.terminated = true
+    else
+      pdbg("Terminated. No termination channel.")
+    end
+
+    -- Set return values
     -- Delete process from process table.
     sched.unregisterProcess(proc.cont)
+
+    pdbg("Unregistered process")
   end)
 
   setmetatable(proc, Process)
 
   sched.registerProcess(proc)
+  sched.pushProcess(proc)
 
   return proc
 end
@@ -56,33 +81,39 @@ function Process.__lt(self, other)
   return self.prio < other.prio
 end
 
+--- Create a new process at the start of the process hierarchy.
+---
+---@param func  fun(any): any   Function to execute in process.
+---@param args  any[]           Table of arguments to routine.
+function M.Start(func, args)
+  newProcess(func, args, nil, Priority.New())
+end
+
 function Process:call(func, ...)
   local args = { ... }
 
-  local chan = Channel.Channel.new({ terminated = false })
+  local chan = Channel.New({ terminated = false })
 
   -- Give the new process our current priority; give ourselves a new priority,
   -- immediately afterwards.
   local prio = self.prio
   self.prio = self.prio:Insert()
 
-  local proc = newProcess(func, args, chan, prio)
-
-  sched.registerProcess(proc)
   sched.pushProcess(self)
-  sched.pushProcess(proc)
+  newProcess(func, args, chan, prio)
   coroutine.yield()
+
+  return chan
 end
 
 function Process:spawn(func, ...)
   local args = { ... }
-  local chan = Channel.Channel.new({ terminated = false })
+  local chan = Channel.New({ terminated = false })
   local prio = self.prio:Insert()
 
-  local proc = newProcess(func, args, chan, prio)
+  newProcess(func, args, chan, prio)
 
-  sched.registerProcess(proc)
-  sched.pushProcess(proc)
+  return chan
 end
 
 --- A lil stateless iterator.
@@ -98,30 +129,34 @@ local function iiter(a, i)
 end
 
 function Process:wait(...)
-  local os = { ... }
+  local ts = { ... }
 
-  for _, o in ipairs(os) do
-    if Channel.is_channel(o) then
-      -- self:wait(..., o, ...), where o is a Channel object,
-      -- i.e., wait on any update to o.
-      Channel.sensitize(o, self)
+  dbg(tostring(self) .. ": waiting on " .. tostring(#ts) .. " channels")
+  for k, t in pairs(ts) do
+    dbg("Argument: " .. tostring(k) .. "->" .. tostring(t))
+
+    if Channel.HasChannel(t) then
+      -- self:wait(..., t, ...), where t: CTable; i.e., wait on any update to t.
+      Channel.Sensitize(t, self)
     else
-      -- self:wait(..., {o, k1 ... kn}, ...), where o is a Channel object and
+      -- self:wait(..., {t, k1 ... kn}, ...), where t: CTable and
       -- k1 ... kn are keys, i.e., wait on updates to o[k1] ... o[kn].
-      for _, k in iiter, o, 1 do
-        Channel.sensitize(o[1], self, k)
+      for _, k in iiter, t, 1 do
+        Channel.Sensitize(t[1], self, k)
       end
     end
   end
 
+  dbg(tostring(self) .. ": about to yield due to wait")
   coroutine.yield()
+  dbg(tostring(self) .. ": returned from yield due to wait")
 
   -- Desensitize from all objects
-  for _, o in ipairs(os) do
-    if Channel.is_channel(o) then
-      Channel.desensitize(o, self)
+  for _, t in ipairs(ts) do
+    if Channel.HasChannel(t) then
+      Channel.Desensitize(t, self)
     else
-      Channel.desensitize(o[1], self)
+      Channel.Desensitize(t[1], self)
     end
   end
 end
@@ -133,13 +168,21 @@ end
 ---@param k any       Key of t to perform update on.
 ---@param v any       Value to assign to t[k].
 function Process:after(d, t, k, v)
-  Channel.after(t, d, k, v)
+  Channel.After(t, d, k, v)
+end
+
+function Process:now()
+  return sched.LogicalTime()
 end
 
 --- Resume execution of a process.
 ---@param p Process
-function M.resume(p)
-  coroutine.resume(p.cont)
+function M.Resume(p)
+  local ok, err = coroutine.resume(p.cont)
+  if not ok then
+    print(err)
+    print(debug.traceback())
+  end
 end
 
 return M

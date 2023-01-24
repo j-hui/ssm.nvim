@@ -93,11 +93,14 @@ end
 ---@return Process|nil  Process structure to run next.
 local function dequeueNext()
   local p
-  if runStack:IsEmpty() then
-    p = runQueue:Pop()
-  end
 
-  if runStack:Peek() < runQueue:Peek() then
+  if runStack:IsEmpty() then
+    -- runStack is empty
+    p = runQueue:Pop()
+  elseif runQueue:Size() == 0 then
+    -- runQueue is empty
+    p = runStack:Pop()
+  elseif runStack:Peek() < runQueue:Peek() then
     -- runStack has higher priority
     p = runStack:Pop()
   else
@@ -112,11 +115,11 @@ local function dequeueNext()
   return p
 end
 
-function M.scheduledProcesses()
+function M.ScheduledProcesses()
   return dequeueNext
 end
 
-function M.scheduleEvent(chan)
+function M.ScheduleEvent(chan)
   if eventScheduled[chan] then
     eventQueue:Reposition(chan, chan) -- TODO: replace with chan.earliest
   else
@@ -129,7 +132,7 @@ local function dequeueEventAt(t)
   ---@type Channel|nil
   local c = eventQueue:Peek()
 
-  if t == Time.NEVER or c == nil or c:nextUpdateTime() ~= t then
+  if t == Time.NEVER or c == nil or c.earliest ~= t then
     return nil
   end
 
@@ -137,25 +140,17 @@ local function dequeueEventAt(t)
   return c
 end
 
-function M.nextUpdateTime()
+function M.NextUpdateTime()
   ---@type Channel|nil
   local c = eventQueue:Peek()
   if c == nil then
     return Time.NEVER
   end
-  return c:nextUpdateTime()
+  return c.earliest
 end
 
-function M.scheduledEvents()
-  return dequeueEventAt, M.nextUpdateTime(), nil
-end
-
-function M.performUpdates()
-  ---@type Channel|nil
-  local c = eventQueue:Peek()
-  if c == nil then
-    return false
-  end
+function M.ScheduledEvents()
+  return dequeueEventAt, M.NextUpdateTime(), nil
 end
 
 local currentTime = 0
@@ -163,8 +158,8 @@ local currentTime = 0
 --- Advance the current logical timestamp; return old and the new timestamps.
 ---
 ---@return Time
-function M.advanceTime()
-  local nextTime = M.nextUpdateTime()
+function M.AdvanceTime()
+  local nextTime = M.NextUpdateTime()
   if nextTime == Time.NEVER then
     return Time.NEVER
   end
@@ -178,7 +173,7 @@ end
 --- Get the current logical timestamp
 ---
 ---@return Time
-function M.logicalTime()
+function M.LogicalTime()
   return currentTime
 end
 

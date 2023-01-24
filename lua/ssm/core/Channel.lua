@@ -1,5 +1,6 @@
 local M = {}
 
+local dbg = require("ssm.core.dbg")
 local sched = require("ssm.core.sched")
 local Time = require("ssm.core.Time")
 
@@ -10,16 +11,20 @@ local Time = require("ssm.core.Time")
 
 ---@class Channel
 ---
----@field package table     CTable              Table attached
+---@field public  table     CTable              Table attached
 ---@field package value     table<Key, any>     Current value
 ---@field package last      table<Key, Time>    Last modified time
 ---@field package later     table<Key, Event>   Delayed update events
----@field package earliest  Time                Earliest scheduled update
+---@field public  earliest  Time                Earliest scheduled update
 ---@field package triggers  table<Process, IsSched>   What to run when updated
+---@field private name string TODO: debugging
 local Channel = {}
 Channel.__index = Channel
 
-M.Channel = Channel
+function Channel:__tostring()
+  -- TODO: debugging
+  return self.name
+end
 
 --- Obtain the Channel metatable of a channel table.
 ---
@@ -33,7 +38,7 @@ end
 ---
 ---@param o   table     The table to check.
 ---@return    boolean   Whether o has a channel attached.
-function M.hasChannel(o)
+function M.HasChannel(o)
   return getmetatable(getChannel(o)) == Channel
 end
 
@@ -41,7 +46,7 @@ end
 ---
 ---@param init    table     The table to initialize the channel's value with.
 ---@return        Channel   The newly constructed Channel.
-function Channel.new(init)
+function Channel.New(init)
   local chan = {
     value = {},
     later = {},
@@ -50,9 +55,14 @@ function Channel.new(init)
     triggers = {},
     __index = M.get,
     __newindex = M.set,
+    name = "c" .. dbg.fresh(),
   }
 
-  local now = sched.logicalTime()
+  function chan.__tostring()
+    return chan.name .. ".table"
+  end
+
+  local now = sched.LogicalTime()
 
   for k, v in pairs(init) do
     chan.value[k], chan.last[k] = v, now
@@ -73,29 +83,13 @@ function Channel.__lt(l, r)
   return Time.lt(l.earliest, r.earliest)
 end
 
---- Obtain the table a channel is attached it.
----
----@param self  Channel
----@return      CTable
-function M.getTable(self)
-  return self.table
-end
-
---- Obtain the earliest time a channel table is scheduled for an update.
----
----@param self  Channel
----@return      Time
-function M.nextUpdateTime(self)
-  return self.earliest
-end
-
 --- Perform delayed update on a channel table, and schedule sensitive processes.
 ---
 ---@param self Channel
-function M.update(self)
+function M.Update(self)
   local nextEarliest = Time.NEVER
 
-  assert(self.earliest == sched.logicalTime(), "Updating at the right time")
+  assert(self.earliest == sched.LogicalTime(), "Updating at the right time")
   local updated_keys = {}
 
   for k, e in pairs(self.later) do
@@ -141,8 +135,8 @@ end
 ---
 ---@param init  table   The table to initialize the channel's value with.
 ---@return      CTable  The newly constructed channel table.
-function M.new(init)
-  return Channel.new(init).table
+function M.New(init)
+  return Channel.New(init).table
 end
 
 --- Getter for channel tables.
@@ -165,7 +159,9 @@ end
 function M.set(tbl, k, v)
   local self = getChannel(tbl)
 
-  local t = v == nil and nil or sched.logicalTime()
+  dbg("Assignment to channel happened: " .. tostring(self))
+
+  local t = v == nil and nil or sched.LogicalTime()
   self.value[k], self.last[k] = v, t
 
   local cur = sched.getCurrent()
@@ -175,10 +171,12 @@ function M.set(tbl, k, v)
 
   for p, e in pairs(self.triggers) do
     if cur < p and (e == true or e[k] == true) then
+      dbg("!!! Woke up sensitive process: " .. tostring(p))
       -- Enqueue any lower priority process that is sensitized to:
       -- (1) any update to table or (2) updates to table[k]
       sched.enqueueProcess(p)
     else
+      dbg("!!! Skipped insensitive process: " .. tostring(p))
       -- Processes not enqueued for execution remain sensitive.
       remaining[p] = e
     end
@@ -224,10 +222,11 @@ end
 ---@param tbl CTable    The channel table to be sensitized to.
 ---@param p   Process   The process to sensitize.
 ---@param k   Key|nil   The key to whose updates p should be sensitive to.
-function M.sensitize(tbl, p, k)
+function M.Sensitize(tbl, p, k)
   local self = getChannel(tbl)
 
   if k == nil then
+    dbg("Sensitizing " .. tostring(p) .. " to all updates to " .. tostring(self))
     -- p is notified for any update to self.table
 
     -- Even if there was already an entry, we can just overwite it with
@@ -236,6 +235,7 @@ function M.sensitize(tbl, p, k)
   else
     -- p is notified for updates to tbl[k]
 
+    dbg("sensitizing " .. tostring(p) .. "to updates to " .. tostring(self) .. "[" .. tostring(k) .. "]")
     if self.triggers[p] then
       -- There is already a triggers entry for p; update it.
 
@@ -254,8 +254,9 @@ end
 --- Remove the trigger for a process, desensitizing it from updates to tbl.
 ---@param tbl CTable    The channel table to be desensitized from.
 ---@param p   Process   The process to desensitize.
-function M.desensitize(tbl, p)
+function M.Desensitize(tbl, p)
   local self = getChannel(tbl)
+  dbg("desensitizing from updates to: " .. tostring(self))
   self.triggers[p] = nil
 end
 
@@ -265,15 +266,15 @@ end
 ---@param d   Duration  How far in the future to schedule an update for.
 ---@param k   Key       The key to at which the delayed update is scheduled.
 ---@param v   any       The value to update k with.
-function M.after(tbl, d, k, v)
+function M.After(tbl, d, k, v)
   local self = getChannel(tbl)
 
-  local t = sched.logicalTime() + d
+  local t = sched.LogicalTime() + d
 
   self.later[k] = { t, v }
   self.earliest = Time.min(self.earliest, t)
 
-  sched.scheduleEvent(self)
+  sched.ScheduleEvent(self)
 end
 
 return M
