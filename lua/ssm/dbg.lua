@@ -2,7 +2,6 @@ local M = {}
 
 setmetatable(M, {
   __call = function(_, ...)
-    return
     -- local info = debug.getinfo(2)
     -- local loc = string.format("%s:%d", info.short_src, info.currentline)
     --

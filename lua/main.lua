@@ -1,37 +1,25 @@
----@diagnostic disable: deprecated
-unpack = table.unpack
+local ssm = require("ssm")
 
-local SSM = require("ssm.SSM")
-
-function SSM:foo(a) -- Note: a points to the table created in main()
-
-  print("foo: wait at time " .. self:now())
+function ssm:foo(a)
   self:wait(a)                        -- Block on update to a
-  print("foo: unblocked at time " .. self:now())
-
   a.val = a.val * 2                   -- Instant assignment
 end
 
-function SSM:bar(a) -- Note: a points to the table created in main()
-
-  print("bar: wait at time " .. self:now())
+function ssm:bar(a)
   self:wait(a)                        -- Block on update to a
-  print("bar: unblocked at time " .. self:now())
-
   a.val = a.val + 4                   -- Instant assignment
 end
 
-function SSM:main()
+function ssm:main()
   ---@type table
-  local t = SSM.Channel { val = 0 }   -- Create channel table with { val = 0 }
+  local t = ssm.Channel { val = 0 }   -- Create channel table with { val = 0 }
+  self:after(3, t, "val", 1)          -- Delayed assignment of a.val = 1
+  self:wait(ssm:bar(t), ssm:foo(t))   -- fork/join on bar() and foo()
 
-  self:after(4, t, "val", 1)          -- Delayed assignment of a.val = 1
-
-  self:wait(SSM:bar(t), SSM:foo(t))   -- fork/join on bar() and foo()
-
-  print("main: value is " .. tostring(t.val) .. " at time " .. self:now())
+  return t.val, self:now()
 end
 
-
---- Ignore this stuff...
-SSM:main() SSM.Start() SSM.Tick()
+local time, ret1, ret2 = ssm.start(ssm.main)
+print("time: " .. tostring(time))
+print("return[1] (t.val): " .. tostring(ret1))
+print("return[2] (self:now()): " .. tostring(ret2))

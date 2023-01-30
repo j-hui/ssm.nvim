@@ -7,17 +7,26 @@ local Priority = require("ssm.Priority")
 local PriorityQueue = require("ssm.PriorityQueue")
 local Stack = require("ssm.Stack")
 
---- A lil stateless iterator.
----
----@param a any[]   What to iterate over.
----@param i integer The 0-indexed index for iteration.
-local function iiter(a, i)
-  i = i + 1
-  local v = a[i]
-  if v then
-    return i, v
+--- ipairs(), except starting from the given index.
+---@param t   any[]                                 Array to iterate over
+---@param s   number                                Start index
+---@return    fun(a: any[], i: number): (any|nil)   The stateless iterator
+---@return    any[]                                 The array to iterate over
+---@return    number                                Start index - 1
+local function ipairs_from(t, s)
+  local function iter(a, i)
+    i = i + 1
+    local v = a[i]
+    if v then
+      return i, v
+    end
   end
+  return iter, t, s - 1
 end
+
+--- For compatability between Lua 5.1 and 5.2/5.3/5.4
+---@diagnostic disable-next-line: deprecated
+local table_unpack = table.unpack or unpack
 
 ----[[ Timestamps and durations ]]----
 
@@ -104,6 +113,9 @@ local event_queue = PriorityQueue()
 ---@type table<Channel, true>
 local event_scheduled = {}
 
+--- Number of active processes. When this hits zero, it's time to stop.
+local num_active = 0
+
 --- Add a process to the process table, indexed by its thread identifier.
 ---
 ---@param proc Process  The process to add.
@@ -185,13 +197,6 @@ local function dequeue_next()
   return p
 end
 
---- Iterator for scheduled processes; dequeues them from run queue and stack.
----
----@return function(): (Process|nil)
-local function scheduled_processes()
-  return dequeue_next
-end
-
 local function schedule_event(chan)
   if event_scheduled[chan] then
     event_queue:reposition(chan, chan) -- TODO: replace with chan.earliest
@@ -213,17 +218,12 @@ local function dequeue_event_at(t)
   return c
 end
 
-local function next_update_time()
-  ---@type Channel|nil
-  local c = event_queue:peek()
-  if c == nil then
-    return Time.NEVER
-  end
-  return c.earliest
+local function num_active_inc()
+  num_active = num_active + 1
 end
 
-local function scheduled_events()
-  return dequeue_event_at, next_update_time(), nil
+local function num_active_dec()
+  num_active = num_active - 1
 end
 
 ---- [[ Channels ]] ----
@@ -291,7 +291,7 @@ local function channel_setter(tbl, k, v)
   local t = v == nil and nil or current_time
   self.value[k], self.last[k] = v, t
 
-  local cur = current_time
+  local cur = M.get_current_process()
 
   -- Accumulator for processes not triggered
   local remaining = {}
@@ -310,6 +310,23 @@ local function channel_setter(tbl, k, v)
   self.triggers = remaining
 end
 
+local function channel_pairs(tbl)
+  local self = table_get_channel(tbl)
+  local f = pairs(self.value)
+  return f, tbl, nil
+end
+
+local function channel_ipairs(tbl)
+  local self = table_get_channel(tbl)
+  local f = ipairs(self.value)
+  return f, tbl, nil
+end
+
+local function channel_len(tbl)
+  local self = table_get_channel(tbl)
+  return #self.value
+end
+
 --- Construct a new Channel whose table is initialized with init.
 ---
 ---@param init    table     The table to initialize the channel's value with.
@@ -323,6 +340,9 @@ local function channel_new(init)
     triggers = {},
     __index = channel_getter,
     __newindex = channel_setter,
+    __pairs = channel_pairs,
+    __ipairs = channel_ipairs,
+    __len = channel_len,
     name = "c" .. dbg.fresh(),
   }
 
@@ -504,10 +524,11 @@ end
 --- Object to store metadata for running thread. Also the subject of self within
 --- SSM routines; methods attached to Processes are part of SSM's public API.
 ---
----@field package cont thread
----@field package prio Priority
----@field private chan Channel
----@field private name string
+---@field package cont    thread
+---@field package prio    Priority
+---@field private chan    Channel
+---@field private name    string
+---@field private active  boolean
 local Process = {}
 Process.__index = Process
 
@@ -519,11 +540,11 @@ end
 ---
 ---@param func  fun(any): any   Function to execute in process.
 ---@param args  any[]           Table of arguments to routine.
----@param chan  Channel|nil     Process status channel.
+---@param rtbl  CTable|nil      Process status channel.
 ---@param prio  Priority        Priority of the process.
 ---@return      Process         The newly constructed process.
-local function process_new(func, args, chan, prio)
-  local proc = { chan = chan, prio = prio, name = "p" .. dbg.fresh() }
+local function process_new(func, args, rtbl, prio)
+  local proc = { rtbl = rtbl, prio = prio, active = true, name = "p" .. dbg.fresh() }
 
   -- proc becomes the self of func
   proc.cont = coroutine.create(function()
@@ -532,27 +553,31 @@ local function process_new(func, args, chan, prio)
     end
 
     pdbg("Created proc for function: " .. tostring(func),
-      "Termination channel: " .. tostring(proc.chan))
+      "Termination channel: " .. tostring(proc.rtbl))
 
-    local r = { func(proc, unpack(args)) }
+    local r = { func(proc, table_unpack(args)) }
 
-
-    if proc.chan then
-
+    -- Set return values
+    if proc.rtbl then
       for i, v in ipairs(r) do
         pdbg("Terminated.", "Assigning return value: [" .. tostring(i) .. "] " .. tostring(v))
-        proc.chan[i] = v
+        proc.rtbl[i] = v
       end
 
       -- Convey termination
-      pdbg("Terminated.", "Assigning to termination channel (" .. tostring(proc.chan) .. ")")
-      proc.chan.terminated = true
+      pdbg("Terminated.", "Assigning to termination channel (" .. tostring(proc.rtbl) .. ")")
+      proc.rtbl.terminated = true
     else
       pdbg("Terminated. No termination channel.")
     end
 
-    -- Set return values
-    -- Delete process from process table.
+    -- Decrement activity count
+    if proc.active then
+      num_active_dec()
+      proc.active = false
+    end
+
+    -- Delete process from process table
     unregister_process(proc.cont)
 
     pdbg("Unregistered process")
@@ -561,7 +586,7 @@ local function process_new(func, args, chan, prio)
   setmetatable(proc, Process)
 
   register_process(proc)
-  push_process(proc)
+  num_active_inc()
 
   return proc
 end
@@ -572,13 +597,14 @@ end
 ---@param other Process
 ---@return      boolean
 function Process.__lt(self, other)
+  dbg("hihi")
   return self.prio < other.prio
 end
 
 function Process:call(func, ...)
   local args = { ... }
 
-  local chan = channel_new({ terminated = false })
+  local rtbl = M.make_channel_table({ terminated = false })
 
   -- Give the new process our current priority; give ourselves a new priority,
   -- immediately afterwards.
@@ -586,37 +612,43 @@ function Process:call(func, ...)
   self.prio = self.prio:insert()
 
   push_process(self)
-  process_new(func, args, chan, prio)
+  push_process(process_new(func, args, rtbl, prio))
+
   coroutine.yield()
 
-  return chan
+  return rtbl
 end
 
 function Process:spawn(func, ...)
   local args = { ... }
-  local chan = channel_new({ terminated = false })
+  local chan = M.make_channel_table({ terminated = false })
   local prio = self.prio:insert()
 
-  process_new(func, args, chan, prio)
+  push_process(process_new(func, args, chan, prio))
 
   return chan
 end
 
 function Process:wait(...)
-  local ts = { ... }
+  local wait_specs = { ... }
 
-  dbg(tostring(self) .. ": waiting on " .. tostring(#ts) .. " channels")
-  for i, t in pairs(ts) do
-    dbg("Argument: " .. tostring(i) .. "->" .. tostring(t))
+  dbg(tostring(self) .. ": waiting on " .. tostring(#wait_specs) .. " channels")
 
-    if table_has_channel(t) then
+  if #wait_specs == 0 then
+    return
+  end
+
+  for i, wait_spec in ipairs(wait_specs) do
+    dbg("Argument: " .. tostring(i) .. "->" .. tostring(wait_spec))
+
+    if table_has_channel(wait_spec) then
       -- self:wait(..., t, ...), where t: CTable; i.e., wait on any update to t.
-      channel_sensitize(t, self)
+      channel_sensitize(wait_spec, self)
     else
       -- self:wait(..., {t, k1 ... kn}, ...), where t: CTable and
       -- k1 ... kn are keys, i.e., wait on updates to o[k1] ... o[kn].
-      for _, k in iiter, t, 1 do
-        channel_sensitize(t[1], self, k)
+      for _, k in ipairs_from(wait_spec, 2) do
+        channel_sensitize(wait_spec[1], self, k)
       end
     end
   end
@@ -626,11 +658,11 @@ function Process:wait(...)
   dbg(tostring(self) .. ": returned from yield due to wait")
 
   -- Desensitize from all objects
-  for _, t in ipairs(ts) do
-    if table_has_channel(t) then
-      channel_desensitize(t, self)
+  for _, wait_spec in ipairs(wait_specs) do
+    if table_has_channel(wait_spec) then
+      channel_desensitize(wait_spec, self)
     else
-      channel_desensitize(t[1], self)
+      channel_desensitize(wait_spec[1], self)
     end
   end
 end
@@ -652,6 +684,20 @@ function Process:now()
   return current_time
 end
 
+function Process:set_active()
+  if not self.active then
+    num_active_inc()
+    self.active = true
+  end
+end
+
+function Process:set_passive()
+  if self.active then
+    num_active_dec()
+    self.active = false
+  end
+end
+
 --- Resume execution of a process.
 ---@param p Process
 local function process_resume(p)
@@ -664,12 +710,52 @@ end
 
 ---- [[ Tick loop ]] ----
 
---- Advance the current logical timestamp; return old and the new timestamps.
+--- Iterator for scheduled processes; dequeues them from run queue and stack.
 ---
----@return Time
-local function advance_time()
-  local next_time = next_update_time()
-  if next_time == Time.NEVER then
+---@return fun(): (Process|nil)   Called every iteration to dequeue next process
+---@return nil                    Unused
+---@return nil                    Unused
+local function scheduled_processes()
+  return dequeue_next, nil, nil
+end
+
+--- Iterator for events scheduled at the current instant; dequeues them.
+---
+---@return fun(): (Channel|nil)   Called every iteration to dequeue next event
+---@return LogicalTime            Which instant to dequeue events for
+---@return nil                    Unused
+local function scheduled_events()
+  return dequeue_event_at, M.next_update_time(), nil
+end
+
+function M.num_active()
+  return num_active
+end
+
+function M.next_update_time()
+  ---@type Channel|nil
+  local c = event_queue:peek()
+  if c == nil then
+    return Time.NEVER
+  end
+  return c.earliest
+end
+
+--- Get the current logical time.
+---
+---@return          LogicalTime   The current time
+function M.current_time()
+  return current_time
+end
+
+--- Advance time to a certain point in the future.
+---
+--- Time must strictly advance monotonically.
+---
+---@param next_time LogicalTime   What time to advance to
+---@return          LogicalTime   The previous timestamp
+function M.set_time(next_time)
+  if current_time == Time.NEVER and next_time == Time.NEVER then
     return Time.NEVER
   end
 
@@ -679,7 +765,7 @@ local function advance_time()
   return current_time
 end
 
-local function do_tick()
+function M.run_instant()
   for c in scheduled_events() do
     channel_do_update(c)
   end
@@ -689,27 +775,10 @@ local function do_tick()
   end
 end
 
-function M.tick()
-  local now = advance_time()
-
-  if now == Time.NEVER then
-    print("Time is never, not doing anything!")
-    return false
-  end
-
-  do_tick()
-  return true
-end
-
---- Begin executing in the SSM context, beginning with
----
----@param f  function   Function to execute in process.
-function M.start(f)
-  process_new(f, {}, nil, Priority.New())
-  do_tick()
-
-
-
+function M.spawn_root_process(f, args)
+  local chan = M.make_channel_table({ terminated = false })
+  push_process(process_new(f, args or {}, chan, Priority()))
+  return chan
 end
 
 return M
