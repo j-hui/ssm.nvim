@@ -7,8 +7,6 @@
 -- - Iterative sifting implementation rather than recursive
 -- - If x < y, x has the higher priority (rather than the other way around)
 
-local M = {}
-
 local ROOT = 1
 
 ---@class PriorityQueue
@@ -27,7 +25,15 @@ local ROOT = 1
 local PriorityQueue = {}
 PriorityQueue.__index = PriorityQueue
 
-M.PriorityQueue = PriorityQueue
+--- Default (empty) constructor for priority queues.
+---
+---@generic V               The type of values.
+---@generic P               The type of priorities.
+---@return  PriorityQueue   The newly constructed queue.
+local function new_priority_queue()
+  return setmetatable({ values = {}, prios = {} }, PriorityQueue)
+end
+
 
 ---@package
 --- Percolate the value at the given index up the binary heap.
@@ -36,7 +42,7 @@ M.PriorityQueue = PriorityQueue
 ---@generic     P             The type of priorities.
 ---@param queue PriorityQueue The queue to sift.
 ---@param current V           The index of the value to sift.
-local function siftUp(queue, current)
+local function sift_up(queue, current)
 
   -- Keep traversing up the tree until either:
   -- - current is the root of the tree, or
@@ -72,7 +78,7 @@ end
 ---@generic     P             The type of priorities.
 ---@param queue PriorityQueue The queue to sift.
 ---@param current V           The index of the value to sift.
-local function siftDown(queue, current)
+local function sift_down(queue, current)
 
   -- Keep traversing down the tree until either:
   -- - current is a leaf of the tree, or
@@ -120,22 +126,13 @@ local function siftDown(queue, current)
   end
 end
 
---- Default (empty) constructor for priority queues.
----
----@generic V               The type of values.
----@generic P               The type of priorities.
----@return  PriorityQueue   The newly constructed queue.
-function PriorityQueue.New()
-  return setmetatable({ values = {}, prios = {} }, PriorityQueue)
-end
-
 --- Copy constructor for priority queues.
 ---
 ---@generic V               The type of values.
 ---@generic P               The type of priorities.
 ---@return  PriorityQueue   A copy of the queue.
-function PriorityQueue:Clone()
-  local queue = PriorityQueue.New()
+function PriorityQueue:clone()
+  local queue = new_priority_queue()
   for i = 1, #self.values do
     table.insert(queue.values, self.values[i])
     table.insert(queue.prios, self.prios[i])
@@ -149,12 +146,12 @@ end
 ---@generic P         The type of priorities.
 ---@param   val   V   The value to add to self.
 ---@param   prio  P   The priority associated with val.
-function PriorityQueue:Add(val, prio)
+function PriorityQueue:add(val, prio)
   table.insert(self.values, val)
   table.insert(self.prios, prio)
 
   if #self.values > ROOT then
-    siftUp(self, #self.values)
+    sift_up(self, #self.values)
   end
 end
 
@@ -164,7 +161,7 @@ end
 ---@generic P       The type of priorities.
 ---@return  V|nil   The highest (least) priority item.
 ---@return  P|nil   The priority of the highest (least) priority item.
-function PriorityQueue:Pop()
+function PriorityQueue:pop()
   if #self.values <= 0 then
     return nil, nil
   end
@@ -178,7 +175,7 @@ function PriorityQueue:Pop()
   table.remove(self.prios, #self.prios)
 
   if #self.values > ROOT then
-    siftDown(self, ROOT)
+    sift_down(self, ROOT)
   end
 
   return val, prio
@@ -192,7 +189,7 @@ end
 ---@generic P         The type of priorities.
 ---@param   val   V   The value to add to self.
 ---@param   prio  P   The new priority to associate with val.
-function PriorityQueue:Reposition(val, prio)
+function PriorityQueue:reposition(val, prio)
   local index = nil
 
   for i, v in ipairs(self.values) do
@@ -208,9 +205,9 @@ function PriorityQueue:Reposition(val, prio)
   local lowerThanChild = child > #self.values and self.prios[child] < prio
 
   if index == ROOT or lowerThanChild then
-    siftDown(self, index)
+    sift_down(self, index)
   else
-    siftUp(self, index)
+    sift_up(self, index)
   end
 end
 
@@ -222,7 +219,7 @@ end
 ---@generic P       The type of priorities.
 ---@return  V|nil   The highest (least) priority item.
 ---@return  P|nil   The priority of the highest (least) priority item.
-function PriorityQueue:Peek()
+function PriorityQueue:peek()
   if #self.values <= 0 then
     return nil, nil
   else
@@ -236,7 +233,7 @@ end
 ---@generic P         The type of priorities.
 ---@return  V[]|nil   An array of values.
 ---@return  P[]|nil   An array of priorities.
-function PriorityQueue:AsTable()
+function PriorityQueue:as_table()
   if not self.values or #self.values < 1 then
     return nil, nil
   end
@@ -254,13 +251,13 @@ end
 
 --- Render a priority queue as human-readable string.
 ---
----@param   withPriorities  boolean|nil   Whether to render priorities.
+---@param   with_priorities  boolean|nil   Whether to render priorities.
 ---@return  string                        The queue formatted as a string.
-function PriorityQueue:ToString(withPriorities)
+function PriorityQueue:to_string(with_priorities)
   local out = ""
   for i = 1, #self.values do
     out = out .. tostring(self.values[i])
-    if withPriorities then
+    if with_priorities then
       out = out .. "(" .. tostring(self.prios[i]) .. ")"
     end
     out = out .. " "
@@ -271,7 +268,7 @@ end
 --- Obtain the number of values stored in the priority queue.
 ---
 ---@return integer  The number of elements stored in the priority queue.
-function PriorityQueue:Size()
+function PriorityQueue:size()
   return #self.values
 end
 
@@ -279,14 +276,14 @@ end
 ---
 ---@return string
 function PriorityQueue:__str()
-  return self:ToString()
+  return self:to_string()
 end
 
 --- Length metamethod.
 ---
 ---@return integer
 function PriorityQueue:__len()
-  return self:Size()
+  return self:size()
 end
 
-return M
+return new_priority_queue

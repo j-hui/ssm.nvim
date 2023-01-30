@@ -1,7 +1,5 @@
 --- A stack implementation whose interface guarantees constant-time operations.
 
-local M = {}
-
 ---@class Stack
 ---
 --- A Stack is an array coupled with a length (i.e., a vector).
@@ -12,13 +10,11 @@ local M = {}
 local Stack = {}
 Stack.__index = Stack
 
-M.Stack = Stack
-
 --- Construct an empty stack.
 ---
 ---@generic T
 ---@return Stack
-function Stack.New()
+local function new_stack()
   return setmetatable({
     len = 0,
     stack = {},
@@ -29,7 +25,7 @@ end
 ---
 ---@generic T
 ---@param elem T
-function Stack:Push(elem)
+function Stack:push(elem)
   if elem == nil then
     -- Refuse to push nil elements.
     return
@@ -43,8 +39,8 @@ end
 ---
 ---@generic T
 ---@return T|nil
-function Stack:Pop()
-  if self:IsEmpty() then
+function Stack:pop()
+  if self:is_empty() then
     return nil
   end
 
@@ -58,14 +54,14 @@ end
 ---
 ---@generic T
 ---@return T
-function Stack:Peek()
+function Stack:peek()
   return self.stack[self.len]
 end
 
 --- Whether the stack is empty.
 ---
 ---@return boolean
-function Stack:IsEmpty()
+function Stack:is_empty()
   return self.len == 0
 end
 
@@ -76,4 +72,4 @@ function Stack:__len()
   return self.len
 end
 
-return M
+return new_stack

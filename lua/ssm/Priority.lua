@@ -19,8 +19,6 @@
 ---   and Jack Zito. Two simplified algorithms for maintaining order in a list.
 ---   2002.
 
-local M = {}
-
 ---@alias Label number
 --- A label is an integer less than arena.
 
@@ -55,26 +53,6 @@ local arena = 2 ^ 46
 local Priority = {}
 Priority.__index = Priority
 
----@class BasePriority : Priority
----@field total number: the total number of priorities assigned under this base
-
---- Construct a priority with a fresh basis.
----
---- Note that priorities with different bases cannot be compared.
----
----@return BasePriority
-function M.New()
-  local base = {
-    label = 0, -- chosen arbitrarily, just like the paper
-    total = 0,
-  }
-  base.base = base
-  base.next = base
-  base.prev = base
-  setmetatable(base, Priority)
-  return base
-end
-
 --- Whether two priorities are ordered.
 ---
 --- a < b means a has a higher priority than b.
@@ -107,7 +85,7 @@ end
 --- successive priorities.
 ---
 ---@return Priority: ordered after self
-function Priority:Insert()
+function Priority:insert()
 
   -- First, relabel successive priorities to evently distribute labels.
   local function weight(p, i)
@@ -158,7 +136,7 @@ end
 --- Delete a priority from its base.
 ---
 --- A deleted priority is no longer valid to use.
-function Priority:Delete()
+function Priority:delete()
   self.base.total = self.base.total - 1
   self.prev.next = self.next
   self.next.prev = self.prev
@@ -169,4 +147,24 @@ function Priority:Delete()
   end
 end
 
-return M
+---@class BasePriority : Priority
+---@field total number: the total number of priorities assigned under this base
+
+--- Construct a priority with a fresh basis.
+---
+--- Note that priorities with different bases cannot be compared.
+---
+---@return BasePriority
+local function new_priority()
+  local base = {
+    label = 0, -- chosen arbitrarily, just like the paper
+    total = 0,
+  }
+  base.base = base
+  base.next = base
+  base.prev = base
+  setmetatable(base, Priority)
+  return base
+end
+
+return new_priority
