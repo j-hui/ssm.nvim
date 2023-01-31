@@ -21,6 +21,7 @@ local function ipairs_from(t, s)
       return i, v
     end
   end
+
   return iter, t, s - 1
 end
 
@@ -101,17 +102,9 @@ local run_stack = Stack()
 -- @type PriorityQueue<Process>
 local run_queue = PriorityQueue()
 
---- Whether a process is scheduled.
----@type table<Process, true>
-local run_scheduled = {}
-
 --- Priority queue for delayed update events to channel tables.
 -- @type PriorityQueue<Channel>
 local event_queue = PriorityQueue()
-
---- Whether a Channel's update event is scheduled.
----@type table<Channel, true>
-local event_scheduled = {}
 
 --- Number of active processes. When this hits zero, it's time to stop.
 local num_active = 0
@@ -143,11 +136,11 @@ end
 ---
 ---@param p Process   Process structure to be queued.
 local function push_process(p)
-  if run_scheduled[p] then
+  if p.scheduled then
     return
   end
 
-  run_scheduled[p] = true
+  p.scheduled = true
 
   local old_head = run_stack:peek()
   if old_head then
@@ -161,11 +154,11 @@ end
 ---
 ---@param p Process   Process structure to be queued.
 local function enqueue_process(p)
-  if run_scheduled[p] then
+  if p.scheduled then
     return
   end
 
-  run_scheduled[p] = true
+  p.scheduled = true
 
   run_queue:add(p, p.prio)
 end
@@ -191,31 +184,32 @@ local function dequeue_next()
   end
 
   if p ~= nil then
-    run_scheduled[p] = nil
+    p.scheduled = false
   end
 
   return p
 end
 
 local function schedule_event(chan)
-  if event_scheduled[chan] then
+  if chan.scheduled then
     event_queue:reposition(chan, chan) -- TODO: replace with chan.earliest
   else
-    event_scheduled[chan] = true
+    chan.scheduled = true
     event_queue:add(chan, chan) -- TODO: replace with chan.earliest
   end
 end
 
 local function dequeue_event_at(t)
   ---@type Channel|nil
-  local c = event_queue:peek()
+  local chan = event_queue:peek()
 
-  if t == Time.NEVER or c == nil or c.earliest ~= t then
+  if t == Time.NEVER or chan == nil or chan.earliest ~= t then
     return nil
   end
 
   event_queue:pop() -- NOTE: result of Pop() is same as c
-  return c
+  chan.scheduled = false
+  return chan
 end
 
 local function num_active_inc()
@@ -235,12 +229,13 @@ end
 
 ---@class Channel
 ---
----@field public  table     CTable              Table attached
----@field package value     table<Key, any>     Current value
----@field package last      table<Key, Time>    Last modified time
----@field package later     table<Key, Event>   Delayed update events
----@field public  earliest  Time                Earliest scheduled update
----@field package triggers  table<Process, IsSched>   What to run when updated
+---@field public  table     CTable                Table attached
+---@field package value     table<Key, any>       Current value
+---@field package last      table<Key, Time>      Last modified time
+---@field package later     table<Key, Event>     Delayed update events
+---@field public  earliest  Time                  Earliest scheduled update
+---@field package triggers  table<Process, true>  What to run when updated
+---@field package scheduled boolean               Whether this is scheduled
 ---@field private name string TODO: debugging
 local Channel = {}
 Channel.__index = Channel
@@ -296,14 +291,12 @@ local function channel_setter(tbl, k, v)
   -- Accumulator for processes not triggered
   local remaining = {}
 
-  for p, e in pairs(self.triggers) do
-    if cur < p and (e == true or e[k] == true) then
-      -- Enqueue any lower priority process that is sensitized to:
-      -- (1) any update to table or (2) updates to table[k]
+  for p, _ in pairs(self.triggers) do
+    if cur < p then
       enqueue_process(p)
     else
       -- Processes not enqueued for execution remain sensitive.
-      remaining[p] = e
+      remaining[p] = true
     end
   end
 
@@ -395,68 +388,28 @@ local function channel_do_update(self)
 
   self.earliest = next_earliest
 
-  -- Accumulator for processes not triggered
-  local remaining = {}
-
-  for p, e in pairs(self.triggers) do
-
-    if e == true then
-      enqueue_process(p)
-      e = nil
-    else
-      for _, k in ipairs(updated_keys) do
-        if e[k] == true then
-          enqueue_process(p)
-          e = nil
-          break
-        end
-      end
-    end
-
-    remaining[p] = e
+  for p, _ in pairs(self.triggers) do
+    enqueue_process(p)
   end
 
-  self.triggers = remaining
+  self.triggers = {}
 end
 
 --- Sensitize a process to updates on a channel table.
----
---- If k is nil, p is sensitized to any updates to tbl. If p was already
---- sensitized to updates to some keys of p, those get overruled by
---- sensitization to any update to tbl.
 ---
 --- If p was already sensitized to any updates to tbl, this method does nothing.
 ---
 ---@param tbl CTable    The channel table to be sensitized to.
 ---@param p   Process   The process to sensitize.
----@param k   Key|nil   The key to whose updates p should be sensitive to.
-local function channel_sensitize(tbl, p, k)
+local function channel_sensitize(tbl, p)
   local self = table_get_channel(tbl)
 
-  if k == nil then
-    dbg("Sensitizing " .. tostring(p) .. " to all updates to " .. tostring(self))
-    -- p is notified for any update to self.table
+  dbg("Sensitizing " .. tostring(p) .. " to updates to " .. tostring(self))
+  -- p is notified for any update to self.table
 
-    -- Even if there was already an entry, we can just overwite it with
-    -- a catch-all entry.
-    self.triggers[p] = true
-  else
-    -- p is notified for updates to tbl[k]
-
-    dbg("sensitizing " .. tostring(p) .. "to updates to " .. tostring(self) .. "[" .. tostring(k) .. "]")
-    if self.triggers[p] then
-      -- There is already a triggers entry for p; update it.
-
-      if self.triggers[p] ~= true then
-        -- p is only sensitized on updates to certain keys of tbl;
-        -- add sub-entry for k.
-        self.triggers[p][k] = true
-      end
-    else
-      -- p is not yet sensitized for updates to tbl; create triggers entry.
-      self.triggers[p] = { k = true }
-    end
-  end
+  -- Even if there was already an entry, we can just overwite it with
+  -- a catch-all entry.
+  self.triggers[p] = true
 end
 
 --- Remove the trigger for a process, desensitizing it from updates to tbl.
@@ -524,11 +477,12 @@ end
 --- Object to store metadata for running thread. Also the subject of self within
 --- SSM routines; methods attached to Processes are part of SSM's public API.
 ---
----@field package cont    thread
----@field package prio    Priority
----@field private chan    Channel
----@field private name    string
----@field private active  boolean
+---@field package cont      thread
+---@field package prio      Priority
+---@field private chan      Channel
+---@field private name      string
+---@field private active    boolean
+---@field package scheduled boolean
 local Process = {}
 Process.__index = Process
 
@@ -597,7 +551,6 @@ end
 ---@param other Process
 ---@return      boolean
 function Process.__lt(self, other)
-  dbg("hihi")
   return self.prio < other.prio
 end
 
@@ -638,19 +591,9 @@ function Process:wait(...)
     return
   end
 
-  for i, wait_spec in ipairs(wait_specs) do
-    dbg("Argument: " .. tostring(i) .. "->" .. tostring(wait_spec))
-
-    if table_has_channel(wait_spec) then
-      -- self:wait(..., t, ...), where t: CTable; i.e., wait on any update to t.
-      channel_sensitize(wait_spec, self)
-    else
-      -- self:wait(..., {t, k1 ... kn}, ...), where t: CTable and
-      -- k1 ... kn are keys, i.e., wait on updates to o[k1] ... o[kn].
-      for _, k in ipairs_from(wait_spec, 2) do
-        channel_sensitize(wait_spec[1], self, k)
-      end
-    end
+  for i, tbl in ipairs(wait_specs) do
+    dbg("Argument: " .. tostring(i) .. "->" .. tostring(tbl))
+    channel_sensitize(tbl, self)
   end
 
   dbg(tostring(self) .. ": about to yield due to wait")
@@ -658,12 +601,8 @@ function Process:wait(...)
   dbg(tostring(self) .. ": returned from yield due to wait")
 
   -- Desensitize from all objects
-  for _, wait_spec in ipairs(wait_specs) do
-    if table_has_channel(wait_spec) then
-      channel_desensitize(wait_spec, self)
-    else
-      channel_desensitize(wait_spec[1], self)
-    end
+  for _, tbl in ipairs(wait_specs) do
+    channel_desensitize(tbl, self)
   end
 end
 
@@ -704,7 +643,7 @@ local function process_resume(p)
   local ok, err = coroutine.resume(p.cont)
   if not ok then
     print(err)
-    print(debug.traceback())
+    print(debug.traceback(p.cont))
   end
 end
 
