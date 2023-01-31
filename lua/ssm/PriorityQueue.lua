@@ -202,7 +202,7 @@ function PriorityQueue:reposition(val, prio)
   self.prios[index] = prio
 
   local child = index * 2
-  local lowerThanChild = child > #self.values and self.prios[child] < prio
+  local lowerThanChild = child < #self.values and self.prios[child] < prio
 
   if index == ROOT or lowerThanChild then
     sift_down(self, index)
