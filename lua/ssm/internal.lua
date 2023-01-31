@@ -39,6 +39,7 @@ M.Time = Time
 ---@operator add(PhysicalTime): PhysicalTime
 ---
 ---@class Timestamp: number
+---FIXME: "inheriting" from number doesn't seem to work...
 ---
 ---@class LogicalTime: Timestamp
 ---@operator add(Duration): LogicalTime
@@ -302,6 +303,9 @@ local function channel_setter(tbl, k, v)
     end
   end
 
+  -- FIXME: (wip) do I let triggers be emptied out while enqueueing processes
+  --        (here), or when the process resumes? The former is probably faster,
+  --        but the latter is safer.
   self.triggers = remaining
 end
 
@@ -394,7 +398,7 @@ local function channel_do_update(self)
     enqueue_process(p)
   end
 
-  self.triggers = {}
+  -- self.triggers = {}
 end
 
 --- Sensitize a process to updates on a channel table.
@@ -407,10 +411,8 @@ local function channel_sensitize(tbl, p)
   local self = table_get_channel(tbl)
 
   dbg("Sensitizing " .. tostring(p) .. " to updates to " .. tostring(self))
-  -- p is notified for any update to self.table
 
-  -- Even if there was already an entry, we can just overwite it with
-  -- a catch-all entry.
+  -- p is notified for any update to self.table
   self.triggers[p] = true
 end
 
