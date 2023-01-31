@@ -38,7 +38,7 @@ M.Time = Time
 ---@operator add(LogicalTime): LogicalTime
 ---@operator add(PhysicalTime): PhysicalTime
 ---
----@class Timestamp: integer|false
+---@class Timestamp: number
 ---
 ---@class LogicalTime: Timestamp
 ---@operator add(Duration): LogicalTime
@@ -48,8 +48,10 @@ M.Time = Time
 ---@operator add(Duration): PhysicalTime
 
 --- Bottom element of logical timestamps.
----@type Time
-Time.NEVER = nil
+---@type LogicalTime
+---@diagnostic disable-next-line: assign-type-mismatch
+Time.NEVER = math.huge
+
 
 --- Return the minimum of two timestamps.
 ---
