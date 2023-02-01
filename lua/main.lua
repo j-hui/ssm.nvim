@@ -14,7 +14,7 @@ function ssm:main()
   ---@type table
   local t = ssm.Channel { val = 0 }   -- Create channel table with { val = 0 }
   self:after(3, t, "val", 1)          -- Delayed assignment of a.val = 1
-  self:wait(ssm:bar(t), ssm:foo(t))   -- fork/join on bar() and foo()
+  self:wait{ssm:bar(t), ssm:foo(t)}   -- fork/join on bar() and foo()
 
   return t.val, self:now()
 end

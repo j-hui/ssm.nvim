@@ -303,9 +303,6 @@ local function channel_setter(tbl, k, v)
     end
   end
 
-  -- FIXME: (wip) do I let triggers be emptied out while enqueueing processes
-  --        (here), or when the process resumes? The former is probably faster,
-  --        but the latter is safer.
   self.triggers = remaining
 end
 
@@ -398,7 +395,7 @@ local function channel_do_update(self)
     enqueue_process(p)
   end
 
-  -- self.triggers = {}
+  self.triggers = {}
 end
 
 --- Sensitize a process to updates on a channel table.
@@ -414,6 +411,16 @@ local function channel_sensitize(tbl, p)
 
   -- p is notified for any update to self.table
   self.triggers[p] = true
+end
+
+--- Whether a process is sensitized to updates on a channel table.
+---
+---@param tbl CTable    The channel table to check.
+---@param p   Process   The process to check sensitivity for
+---@return    boolean   Whether the process is sensitized
+local function channel_is_sensitized(tbl, p)
+  local self = table_get_channel(tbl)
+  return self.triggers[p] ~= nil
 end
 
 --- Remove the trigger for a process, desensitizing it from updates to tbl.
@@ -595,19 +602,78 @@ function Process:wait(...)
     return
   end
 
-  for i, tbl in ipairs(wait_specs) do
-    dbg("Argument: " .. tostring(i) .. "->" .. tostring(tbl))
-    channel_sensitize(tbl, self)
+  for i, wait_spec in ipairs(wait_specs) do
+    if table_has_channel(wait_spec) then
+      local tbl = wait_spec
+      dbg("Argument: " .. tostring(i) .. "->" .. tostring(tbl))
+      channel_sensitize(tbl, self)
+    else
+      for j, tbl in ipairs(wait_spec) do
+        dbg("Argument: " .. tostring(i) .. "." .. tostring(j) .. "->" .. tostring(tbl))
+        channel_sensitize(tbl, self)
+      end
+    end
   end
 
-  dbg(tostring(self) .. ": about to yield due to wait")
-  coroutine.yield()
-  dbg(tostring(self) .. ": returned from yield due to wait")
+  local keep_waiting = true
+  while keep_waiting do
 
-  -- Desensitize from all objects
-  for _, tbl in ipairs(wait_specs) do
-    channel_desensitize(tbl, self)
+    dbg(tostring(self) .. ": about to yield due to wait")
+    coroutine.yield()
+    dbg(tostring(self) .. ": returned from yield due to wait")
+
+    -- At this point, all channel tables that this process is sensitive to have
+    -- already removed this process from its sensitivity list (triggers).
+    -- This process needs to iterate through and determine whether it is done
+    -- waiting.
+
+    for i, wait_spec in ipairs(wait_specs) do
+      if wait_spec ~= true then
+        if table_has_channel(wait_spec) then
+          local tbl = wait_spec
+          if not channel_is_sensitized(tbl, self) then
+            wait_specs[i] = true
+            keep_waiting = false
+          end
+        else
+          local num_completed = 0
+          for j, tbl in ipairs(wait_spec) do
+            if tbl == true then
+              num_completed = num_completed + 1
+            else
+              if not channel_is_sensitized(tbl, self) then
+                wait_specs[i][j] = true
+                num_completed = num_completed + 1
+              end
+            end
+          end
+          if num_completed == #wait_spec then
+            wait_specs[i] = true
+            keep_waiting = false
+          end
+        end
+      end -- if wait_spec ~= true
+    end -- for i, wait_spec in ipairs(wait_specs)
+  end -- while keep_waiting
+
+  for i, wait_spec in ipairs(wait_specs) do
+    if wait_spec ~= true then
+      if table_has_channel(wait_spec) then
+        local tbl = wait_spec
+        channel_desensitize(tbl, self)
+        wait_specs[i] = false
+      else
+        for _, tbl in ipairs(wait_spec) do
+          if tbl ~= true then
+            channel_desensitize(tbl, self)
+          end
+        end
+        wait_specs[i] = false
+      end
+    end
   end
+
+  return table_unpack(wait_specs)
 end
 
 --- Schedule a delayed update on a channel.
@@ -703,6 +769,8 @@ function M.set_time(next_time)
   end
 
   assert(Time.lt(current_time, next_time), "Time must advance forwards")
+
+  dbg("===== ADVANCING TIME " .. tostring(current_time) .. " -> " .. tostring(next_time) .. " =====")
 
   current_time = next_time
   return current_time
