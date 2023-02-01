@@ -16,10 +16,7 @@ function ssm:main()
   self:after(3, t, "val", 1)          -- Delayed assignment of a.val = 1
   self:wait{ssm:bar(t), ssm:foo(t)}   -- fork/join on bar() and foo()
 
-  return t.val, self:now()
+  return t.val, "main terminated at " .. tostring(self:now())
 end
 
-local time, ret1, ret2 = ssm.start(ssm.main)
-print("time: " .. tostring(time))
-print("return[1] (t.val): " .. tostring(ret1))
-print("return[2] (self:now()): " .. tostring(ret2))
+print(ssm.start(ssm.main))
