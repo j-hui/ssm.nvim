@@ -27,10 +27,13 @@ local table_unpack = table.unpack or unpack
 ---@operator add(Duration): PhysicalTime
 
 --- Bottom element of logical timestamps.
----@type LogicalTime
----@diagnostic disable-next-line: assign-type-mismatch
 local NEVER = math.huge
 
+-- Silly cast to satisfy sumneko...
+---@cast NEVER LogicalTime
+
+--- Bottom element of logical timestamps.
+---@type LogicalTime
 M.NEVER = NEVER
 
 --- Current logical time
