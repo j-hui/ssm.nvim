@@ -15,7 +15,7 @@ end
 function ssm:fib(n)
   if n < 2 then
     self:wait(ssm:pause(n))
-    return 1
+    return n
   end
   local r1 = ssm:fib(n - 1)
   local r2 = ssm:fib(n - 2)
@@ -27,7 +27,7 @@ function ssm:fib(n)
 end
 
 local t, v = ssm.start(function(self)
-  local r = ssm:fib(10)
+  local r = ssm:fib(20)
   self:wait(r)
   return r[1]
 end)
