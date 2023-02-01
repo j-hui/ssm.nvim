@@ -79,9 +79,9 @@ local methods = {}
 ---
 ---@generic T
 ---
----@param entry_point fun(): T ...      Entry point for SSM execution.
----@return LogicalTime completion_time  # When SSM execution completed.
----@return T           return_value     # Return value of the entry point.
+---@param entry_point fun(Process): T ... Entry point for SSM execution.
+---@return LogicalTime completion_time    # When SSM execution completed.
+---@return T           return_value       # Return value of the entry point.
 M.start = function(entry_point)
   local ret
   if methods[entry_point] then

@@ -164,7 +164,7 @@ local function dequeue_event_at(t)
     return nil
   end
 
-  event_queue:pop() -- NOTE: result of Pop() is same as c
+  event_queue:pop() -- NOTE: result of pop() is same as c
   chan.scheduled = false
   return chan
 end
