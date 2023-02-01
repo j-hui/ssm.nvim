@@ -1,5 +1,4 @@
 --- Internal implementation of the SSM library
-
 local M = {}
 
 local dbg = require("ssm.dbg")
@@ -7,32 +6,11 @@ local Priority = require("ssm.Priority")
 local PriorityQueue = require("ssm.PriorityQueue")
 local Stack = require("ssm.Stack")
 
---- ipairs(), except starting from the given index.
----@param t   any[]                                 Array to iterate over
----@param s   number                                Start index
----@return    fun(a: any[], i: number): (any|nil)   The stateless iterator
----@return    any[]                                 The array to iterate over
----@return    number                                Start index - 1
-local function ipairs_from(t, s)
-  local function iter(a, i)
-    i = i + 1
-    local v = a[i]
-    if v then
-      return i, v
-    end
-  end
-
-  return iter, t, s - 1
-end
-
 --- For compatability between Lua 5.1 and 5.2/5.3/5.4
 ---@diagnostic disable-next-line: deprecated
 local table_unpack = table.unpack or unpack
 
 ----[[ Timestamps and durations ]]----
-
-local Time = {}
-M.Time = Time
 
 ---@class Duration: integer
 ---@operator add(LogicalTime): LogicalTime
@@ -51,40 +29,9 @@ M.Time = Time
 --- Bottom element of logical timestamps.
 ---@type LogicalTime
 ---@diagnostic disable-next-line: assign-type-mismatch
-Time.NEVER = math.huge
+local NEVER = math.huge
 
-
---- Return the minimum of two timestamps.
----
----@generic T: Timestamp
----@param l T
----@param r T
----@return  T
-function Time.min(l, r)
-  if l == M.NEVER then
-    return r
-  elseif r == M.NEVER then
-    return l
-  else
-    return math.min(l, r)
-  end
-end
-
---- Whether a timestamp is greater than another.
----
----@generic T: Timestamp
----@param l T
----@param r T
----@return  boolean
-function Time.lt(l, r)
-  if l == M.NEVER then
-    return false
-  elseif r == M.NEVER then
-    return true
-  else
-    return l < r
-  end
-end
+M.NEVER = NEVER
 
 --- Current logical time
 ---@type Time
@@ -128,7 +75,7 @@ end
 
 --- Obtain process structure for currently running coroutine thread.
 ---
----@return  Process         The current process structure.
+---@return  Process         current_process
 function M.get_current_process()
   return proc_table[coroutine.running()]
 end
@@ -168,7 +115,7 @@ end
 
 --- Obtain the process structure for the process scheduled to run next.
 ---
----@return Process|nil  Process structure to run next.
+---@return Process|nil  next_process
 local function dequeue_next()
   local p
 
@@ -193,20 +140,27 @@ local function dequeue_next()
   return p
 end
 
+--- Schedule a delayed update event for a channel.
+---
+---@param chan Channel
 local function schedule_event(chan)
   if chan.scheduled then
-    event_queue:reposition(chan, chan) -- TODO: replace with chan.earliest
+    event_queue:reposition(chan, chan.earliest)
   else
     chan.scheduled = true
-    event_queue:add(chan, chan) -- TODO: replace with chan.earliest
+    event_queue:add(chan, chan.earliest)
   end
 end
 
+--- Dequeue a delayed update event at time t, if any.
+---
+---@param   t LogicalTime
+---@return    Channel|nil maybe_channel
 local function dequeue_event_at(t)
   ---@type Channel|nil
   local chan = event_queue:peek()
 
-  if t == Time.NEVER or chan == nil or chan.earliest ~= t then
+  if t == NEVER or chan == nil or chan.earliest ~= t then
     return nil
   end
 
@@ -215,10 +169,12 @@ local function dequeue_event_at(t)
   return chan
 end
 
+--- Increment the number of processes considered active.
 local function num_active_inc()
   num_active = num_active + 1
 end
 
+--- Decrement the number of processes considered active.
 local function num_active_dec()
   num_active = num_active - 1
 end
@@ -243,15 +199,15 @@ end
 local Channel = {}
 Channel.__index = Channel
 
+--- FIXME: this only exists for debugging
 function Channel:__tostring()
-  -- FIXME: for debugging
   return self.name
 end
 
 --- Obtain the Channel metatable of a channel table.
 ---
 ---@param tbl CTable
----@return    Channel
+---@return    Channel tbl_channel
 local function table_get_channel(tbl)
   return getmetatable(tbl)
 end
@@ -259,7 +215,7 @@ end
 --- See if a table has a channel attached ot it.
 ---
 ---@param o   table     The table to check.
----@return    boolean   Whether o has a channel attached.
+---@return    boolean   has_channel
 local function table_has_channel(o)
   return getmetatable(table_get_channel(o)) == Channel
 end
@@ -306,18 +262,39 @@ local function channel_setter(tbl, k, v)
   self.triggers = remaining
 end
 
+--- Override for channel tables' __pairs() method.
+---
+---@generic K
+---@generic V
+---
+---@param tbl table<K, V>   What to iterate over.
+---@return fun(table: table<K, V>, i: integer|nil):K, V iterator
+---@return table<K, V>                                  state
+---@return nil                                          unused
 local function channel_pairs(tbl)
   local self = table_get_channel(tbl)
   local f = pairs(self.value)
   return f, tbl, nil
 end
 
+--- Override for channel tables' __ipairs() method.
+---
+---@generic T
+---
+---@param tbl T[]           What to iterate over.
+---@return fun(table: T[], i: integer|nil):integer, T   iterator
+---@return T[]                                          state
+---@return nil                                          unused
 local function channel_ipairs(tbl)
   local self = table_get_channel(tbl)
   local f = ipairs(self.value)
   return f, tbl, nil
 end
 
+--- Override for channel tables' __len() method.
+---
+---@param   tbl     CTable  The channel table
+---@return          integer length
 local function channel_len(tbl)
   local self = table_get_channel(tbl)
   return #self.value
@@ -326,13 +303,13 @@ end
 --- Construct a new Channel whose table is initialized with init.
 ---
 ---@param init    table     The table to initialize the channel's value with.
----@return        Channel   The newly constructed Channel.
+---@return        Channel   new_channel
 local function channel_new(init)
   local chan = {
     value = {},
     later = {},
     last = {},
-    earliest = Time.NEVER,
+    earliest = NEVER,
     triggers = {},
     __index = channel_getter,
     __newindex = channel_setter,
@@ -362,16 +339,16 @@ end
 ---
 ---@param l Channel
 ---@param r Channel
----@return boolean
+---@return boolean result
 function Channel.__lt(l, r)
-  return Time.lt(l.earliest, r.earliest)
+  return l.earliest < r.earliest
 end
 
 --- Perform delayed update on a channel table, and schedule sensitive processes.
 ---
 ---@param self Channel
 local function channel_do_update(self)
-  local next_earliest = Time.NEVER
+  local next_earliest = NEVER
 
   assert(self.earliest == current_time, "Updating at the right time")
   local updated_keys = {}
@@ -384,8 +361,8 @@ local function channel_do_update(self)
       self.later[k] = nil
       table.insert(updated_keys, k)
     else
-      assert(Time.lt(self.earliest, t), "Updates are taking place out of order??")
-      next_earliest = Time.min(next_earliest, t)
+      assert(self.earliest < t, "Updates are taking place out of order??")
+      next_earliest = math.min(next_earliest, t)
     end
   end
 
@@ -417,7 +394,7 @@ end
 ---
 ---@param tbl CTable    The channel table to check.
 ---@param p   Process   The process to check sensitivity for
----@return    boolean   Whether the process is sensitized
+---@return    boolean   is_sensitized
 local function channel_is_sensitized(tbl, p)
   local self = table_get_channel(tbl)
   return self.triggers[p] ~= nil
@@ -442,7 +419,7 @@ local function channel_schedule_update(tbl, t, k, v)
   local self = table_get_channel(tbl)
 
   self.later[k] = { t, v }
-  self.earliest = Time.min(self.earliest, t)
+  self.earliest = math.min(self.earliest, t)
 
   schedule_event(self)
 end
@@ -450,7 +427,7 @@ end
 --- Construct a new table with an attached channel.
 ---
 ---@param init  table   The table to initialize the channel's value with.
----@return      CTable  The newly constructed channel table.
+---@return      CTable  channel_table
 function M.make_channel_table(init)
   return channel_new(init).table
 end
@@ -464,7 +441,7 @@ end
 ---
 ---@param tbl CTable    The channel table.
 ---@param k   Key|nil   The key of tbl.
----@return    Time|nil  Logical timestamp of last modification, if any.
+---@return    Time|nil  last_modification
 function M.channel_last_updated(tbl, k)
   local self = table_get_channel(tbl)
 
@@ -507,7 +484,7 @@ end
 ---@param args  any[]           Table of arguments to routine.
 ---@param rtbl  CTable|nil      Process status channel.
 ---@param prio  Priority        Priority of the process.
----@return      Process         The newly constructed process.
+---@return      Process         new_process
 local function process_new(func, args, rtbl, prio)
   local proc = { rtbl = rtbl, prio = prio, active = true, name = "p" .. dbg.fresh() }
 
@@ -518,7 +495,7 @@ local function process_new(func, args, rtbl, prio)
     end
 
     pdbg("Created proc for function: " .. tostring(func),
-      "Termination channel: " .. tostring(proc.rtbl))
+      "return channel: " .. tostring(proc.rtbl))
 
     local r = { func(proc, table_unpack(args)) }
 
@@ -530,10 +507,10 @@ local function process_new(func, args, rtbl, prio)
       end
 
       -- Convey termination
-      pdbg("Terminated.", "Assigning to termination channel (" .. tostring(proc.rtbl) .. ")")
+      pdbg("Terminated.", "Assigning to return channel (" .. tostring(proc.rtbl) .. ")")
       proc.rtbl.terminated = true
     else
-      pdbg("Terminated. No termination channel.")
+      pdbg("Terminated. No return channel.")
     end
 
     -- Decrement activity count
@@ -565,6 +542,17 @@ function Process.__lt(self, other)
   return self.prio < other.prio
 end
 
+--- Create a process from a function, at a higher priority than the caller.
+---
+--- The caller will suspend as the newly spawned process executes its inaugural
+--- instant; the caller will resume execution in the same instant after the new
+--- process waits or terminates.
+---
+---@generic T
+---
+---@param func  fun(T...)
+---@param ...   T
+---@return      CTable    return_channel
 function Process:call(func, ...)
   local args = { ... }
 
@@ -583,6 +571,16 @@ function Process:call(func, ...)
   return rtbl
 end
 
+--- Create a process from a function, at a lower priority than the caller.
+---
+--- The newly spawned process will execute its inaugural instant after the
+--- caller waits or terminates.
+---
+---@generic T
+---
+---@param func  fun(T...)
+---@param ...   T
+---@return      CTable    return_channel
 function Process:spawn(func, ...)
   local args = { ... }
   local chan = M.make_channel_table({ terminated = false })
@@ -593,6 +591,24 @@ function Process:spawn(func, ...)
   return chan
 end
 
+--- Wait for updates on some number of channel tables.
+---
+--- Each argument is a "wait specification", which is either be a channel table
+--- or an array of channel tables. A wait specification is satisfied when all
+--- channel tables therein have been assigned to (not necessarily in the same
+--- instant).
+---
+--- wait() unblocks when at least one wait specification is satisfied. It will
+--- return multiple boolean return values, positionally indicating whether each
+--- wait specification in the argument was satisfied.
+---
+--- In other words, wait(a, {b, c}) will unblock when a is updated, or both
+--- b and c are updated.
+---
+--- TODO: reimplement without clobbering? And remove casts.
+---
+---@param   ... CTable|CTable[]   Wait specification
+---@return      boolean ...       Whether that item unblocked
 function Process:wait(...)
   local wait_specs = { ... }
 
@@ -614,6 +630,8 @@ function Process:wait(...)
       end
     end
   end
+
+  ---@cast wait_specs (CTable|true|(CTable|true)[])[]
 
   local keep_waiting = true
   while keep_waiting do
@@ -656,6 +674,8 @@ function Process:wait(...)
     end -- for i, wait_spec in ipairs(wait_specs)
   end -- while keep_waiting
 
+  ---@cast wait_specs (CTable|boolean|(CTable|boolean)[])[]
+
   for i, wait_spec in ipairs(wait_specs) do
     if wait_spec ~= true then
       if table_has_channel(wait_spec) then
@@ -673,6 +693,8 @@ function Process:wait(...)
     end
   end
 
+  ---@cast wait_specs boolean[]
+
   return table_unpack(wait_specs)
 end
 
@@ -688,7 +710,7 @@ end
 
 --- Obtain the current logical time.
 ---
----@return LogicalTime
+---@return LogicalTime current_time
 function Process:now()
   return current_time
 end
@@ -712,8 +734,8 @@ end
 local function process_resume(p)
   local ok, err = coroutine.resume(p.cont)
   if not ok then
-    print(err)
-    print(debug.traceback(p.cont))
+    -- TODO: test this
+    error(err .. "\n" .. debug.traceback(p.cont))
   end
 end
 
@@ -721,38 +743,48 @@ end
 
 --- Iterator for scheduled processes; dequeues them from run queue and stack.
 ---
----@return fun(): (Process|nil)   Called every iteration to dequeue next process
----@return nil                    Unused
----@return nil                    Unused
+---@return fun(): (Process|nil)   iterator
+---@return nil                    unused
+---@return nil                    unused
 local function scheduled_processes()
   return dequeue_next, nil, nil
 end
 
 --- Iterator for events scheduled at the current instant; dequeues them.
 ---
----@return fun(): (Channel|nil)   Called every iteration to dequeue next event
----@return LogicalTime            Which instant to dequeue events for
----@return nil                    Unused
+---@return fun(): Channel|nil   iterator
+---@return LogicalTime          event_time
+---@return nil                  unused
 local function scheduled_events()
-  return dequeue_event_at, M.next_update_time(), nil
+  return dequeue_event_at, M.next_event_time(), nil
 end
 
+--- Obtain number of active processes.
+---
+--- If this returns zero, SSM execution should terminate.
+---
+---@return integer active_processes
 function M.num_active()
   return num_active
 end
 
-function M.next_update_time()
+--- Time of the next scheduled update event, if any.
+---
+--- Returns NEVER if there is no event scheduled.
+---
+---@return LogicalTime next_update_time
+function M.next_event_time()
   ---@type Channel|nil
   local c = event_queue:peek()
   if c == nil then
-    return Time.NEVER
+    return NEVER
   end
   return c.earliest
 end
 
 --- Get the current logical time.
 ---
----@return          LogicalTime   The current time
+---@return LogicalTime time
 function M.current_time()
   return current_time
 end
@@ -761,21 +793,23 @@ end
 ---
 --- Time must strictly advance monotonically.
 ---
----@param next_time LogicalTime   What time to advance to
----@return          LogicalTime   The previous timestamp
+---@param next_time LogicalTime                   What time to advance to
+---@return          LogicalTime   previous_time # The previous timestamp
 function M.set_time(next_time)
-  if current_time == Time.NEVER and next_time == Time.NEVER then
-    return Time.NEVER
+  if current_time == NEVER and next_time == NEVER then
+    return NEVER
   end
-
-  assert(Time.lt(current_time, next_time), "Time must advance forwards")
 
   dbg("===== ADVANCING TIME " .. tostring(current_time) .. " -> " .. tostring(next_time) .. " =====")
 
+  assert(current_time < next_time, "Time must advance forwards")
+
+  local previous_time = current_time
   current_time = next_time
-  return current_time
+  return previous_time
 end
 
+--- Execute an instant. Performs all scheduled updates, then executes processes.
 function M.run_instant()
   for c in scheduled_events() do
     channel_do_update(c)
@@ -786,10 +820,24 @@ function M.run_instant()
   end
 end
 
-function M.spawn_root_process(f, args)
-  local chan = M.make_channel_table({ terminated = false })
-  push_process(process_new(f, args or {}, chan, Priority()))
-  return chan
+--- Spawn a root process that will execute on the first instant.
+---
+--- current_time is (re-)initialized to start_time, if start_time is specified;
+--- otherwise, current_time is (re-)initialized to 0.
+---
+---@generic T
+---@generic R
+---
+---@param entry_point fun(T...): R      The entry point function.
+---@param entry_args  T[]|nil           Arguments given to entry_point.
+---@param start_time  LogicalTime|nil   What to initialize current_time to
+---@return            CTable            return_channel
+function M.set_start(entry_point, entry_args, start_time)
+  -- TODO: reset process tables etc.?
+  current_time = start_time or 0
+  local ret = M.make_channel_table({ terminated = false })
+  push_process(process_new(entry_point, entry_args or {}, ret, Priority()))
+  return ret
 end
 
 return M
