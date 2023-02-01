@@ -802,7 +802,7 @@ function M.set_time(next_time)
 
   dbg("===== ADVANCING TIME " .. tostring(current_time) .. " -> " .. tostring(next_time) .. " =====")
 
-  assert(current_time < next_time, "Time must advance forwards")
+  assert(current_time < next_time, "Time must advance forwards " .. tostring(current_time) .. "-/->" .. tostring(next_time))
 
   local previous_time = current_time
   current_time = next_time
