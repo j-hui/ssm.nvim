@@ -101,7 +101,7 @@ local function sift_down(queue, current)
       break
     end
 
-    if child + 1 > #queue.values and -- There is also a right child
+    if child + 1 <= #queue.values and -- There is also a right child
         queue.prios[child + 1] < queue.prios[child] --  with higher priority
     then
       -- Pick right child instead
