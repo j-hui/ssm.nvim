@@ -27,25 +27,24 @@ local table_unpack = table.unpack or unpack
 ---@operator add(Duration): PhysicalTime
 
 --- Bottom element of logical timestamps.
-local NEVER = math.huge
+local never = math.huge
 
 -- Silly cast to satisfy sumneko...
----@cast NEVER LogicalTime
+---@cast never LogicalTime
 
 --- Bottom element of logical timestamps.
 ---@type LogicalTime
-M.NEVER = NEVER
+M.never = never
 
 --- Current logical time
 ---@type Time
 local current_time = 0
 
-
 ----[[ Scheduler state and decision-making ]]----
 
 --- Process table
----@type table<thread, Process>
-local proc_table = {}
+---@type Process|nil
+local current_proc = nil
 
 --- Stack of queued processes (head has the highest priority).
 -- @type Stack<Process>
@@ -62,25 +61,23 @@ local event_queue = PriorityQueue()
 --- Number of active processes. When this hits zero, it's time to stop.
 local num_active = 0
 
---- Add a process to the process table, indexed by its thread identifier.
+--- Obtain process structure for currently running coroutine thread.
 ---
----@param proc Process  The process to add.
-local function register_process(proc)
-  proc_table[proc.cont] = proc
-end
-
---- Remove an indexed process from the process table.
----
----@param tid thread The thread identifier in the process table.
-local function unregister_process(tid)
-  proc_table[tid] = nil
+---@return  Process|nil     current_process
+function M.get_current_process()
+  return current_proc
 end
 
 --- Obtain process structure for currently running coroutine thread.
 ---
----@return  Process         current_process
-function M.get_current_process()
-  return proc_table[coroutine.running()]
+--- Unlike get_current_process(), this function will throw an error if nothing
+--- is running.
+---
+---@return Process      current_process
+local function get_running_process()
+  local p = M.get_current_process()
+  assert(p ~= nil, "Nothing is currently running")
+  return p
 end
 
 --- Add a process structure to the run stack.
@@ -163,7 +160,7 @@ local function dequeue_event_at(t)
   ---@type Channel|nil
   local chan = event_queue:peek()
 
-  if t == NEVER or chan == nil or chan.earliest ~= t then
+  if t == never or chan == nil or chan.earliest ~= t then
     return nil
   end
 
@@ -312,7 +309,7 @@ local function channel_new(init)
     value = {},
     later = {},
     last = {},
-    earliest = NEVER,
+    earliest = never,
     triggers = {},
     __index = channel_getter,
     __newindex = channel_setter,
@@ -351,7 +348,7 @@ end
 ---
 ---@param self Channel
 local function channel_do_update(self)
-  local next_earliest = NEVER
+  local next_earliest = never
 
   assert(self.earliest == current_time, "Updating at the right time")
   local updated_keys = {}
@@ -415,11 +412,14 @@ end
 --- Scheduld a delayed update to a channel table.
 ---
 ---@param tbl CTable    The channel table to schedule an update to.
----@param t   Time      How far in the future to schedule an update for.
+---@param d   Duration  How long after now to perform update.
 ---@param k   Key       The key to at which the delayed update is scheduled.
 ---@param v   any       The value to update k with.
-local function channel_schedule_update(tbl, t, k, v)
+function M.channel_schedule_update(tbl, d, k, v)
   local self = table_get_channel(tbl)
+  assert(d > 0, "Delay must be a non-zero duration")
+
+  local t = current_time + d
 
   self.later[k] = { t, v }
   self.earliest = math.min(self.earliest, t)
@@ -472,7 +472,7 @@ end
 ---@field package prio      Priority
 ---@field private chan      Channel
 ---@field private name      string
----@field private active    boolean
+---@field package active    boolean
 ---@field package scheduled boolean
 local Process = {}
 Process.__index = Process
@@ -500,7 +500,7 @@ local function process_new(func, args, rtbl, prio)
     pdbg("Created proc for function: " .. tostring(func),
       "return channel: " .. tostring(proc.rtbl))
 
-    local r = { func(proc, table_unpack(args)) }
+    local r = { func(table_unpack(args)) }
 
     -- Set return values
     if proc.rtbl then
@@ -522,15 +522,11 @@ local function process_new(func, args, rtbl, prio)
       proc.active = false
     end
 
-    -- Delete process from process table
-    unregister_process(proc.cont)
-
     pdbg("Unregistered process")
   end)
 
   setmetatable(proc, Process)
 
-  register_process(proc)
   num_active_inc()
 
   return proc
@@ -556,17 +552,18 @@ end
 ---@param func  fun(T...)
 ---@param ...   T
 ---@return      CTable    return_channel
-function Process:call(func, ...)
+function M.process_spawn(func, ...)
+  local cur = get_running_process()
   local args = { ... }
 
   local rtbl = M.make_channel_table({ terminated = false })
 
   -- Give the new process our current priority; give ourselves a new priority,
   -- immediately afterwards.
-  local prio = self.prio
-  self.prio = self.prio:insert()
+  local prio = cur.prio
+  cur.prio = cur.prio:insert()
 
-  push_process(self)
+  push_process(cur)
   push_process(process_new(func, args, rtbl, prio))
 
   coroutine.yield()
@@ -584,10 +581,12 @@ end
 ---@param func  fun(T...)
 ---@param ...   T
 ---@return      CTable    return_channel
-function Process:spawn(func, ...)
+function M.process_defer(func, ...)
+  local cur = get_running_process()
+
   local args = { ... }
   local chan = M.make_channel_table({ terminated = false })
-  local prio = self.prio:insert()
+  local prio = cur.prio:insert()
 
   push_process(process_new(func, args, chan, prio))
 
@@ -612,10 +611,11 @@ end
 ---
 ---@param   ... CTable|CTable[]   Wait specification
 ---@return      boolean ...       Whether that item unblocked
-function Process:wait(...)
+function M.process_wait(...)
+  local cur = get_running_process()
   local wait_specs = { ... }
 
-  dbg(tostring(self) .. ": waiting on " .. tostring(#wait_specs) .. " channels")
+  dbg(tostring(cur) .. ": waiting on " .. tostring(#wait_specs) .. " channels")
 
   if #wait_specs == 0 then
     return
@@ -625,11 +625,11 @@ function Process:wait(...)
     if table_has_channel(wait_spec) then
       local tbl = wait_spec
       dbg("Argument: " .. tostring(i) .. "->" .. tostring(tbl))
-      channel_sensitize(tbl, self)
+      channel_sensitize(tbl, cur)
     else
       for j, tbl in ipairs(wait_spec) do
         dbg("Argument: " .. tostring(i) .. "." .. tostring(j) .. "->" .. tostring(tbl))
-        channel_sensitize(tbl, self)
+        channel_sensitize(tbl, cur)
       end
     end
   end
@@ -639,9 +639,9 @@ function Process:wait(...)
   local keep_waiting = true
   while keep_waiting do
 
-    dbg(tostring(self) .. ": about to yield due to wait")
+    dbg(tostring(cur) .. ": about to yield due to wait")
     coroutine.yield()
-    dbg(tostring(self) .. ": returned from yield due to wait")
+    dbg(tostring(cur) .. ": returned from yield due to wait")
 
     -- At this point, all channel tables that this process is sensitive to have
     -- already removed this process from its sensitivity list (triggers).
@@ -652,7 +652,7 @@ function Process:wait(...)
       if wait_spec ~= true then
         if table_has_channel(wait_spec) then
           local tbl = wait_spec
-          if not channel_is_sensitized(tbl, self) then
+          if not channel_is_sensitized(tbl, cur) then
             wait_specs[i] = true
             keep_waiting = false
           end
@@ -662,7 +662,7 @@ function Process:wait(...)
             if tbl == true then
               num_completed = num_completed + 1
             else
-              if not channel_is_sensitized(tbl, self) then
+              if not channel_is_sensitized(tbl, cur) then
                 wait_specs[i][j] = true
                 num_completed = num_completed + 1
               end
@@ -683,12 +683,12 @@ function Process:wait(...)
     if wait_spec ~= true then
       if table_has_channel(wait_spec) then
         local tbl = wait_spec
-        channel_desensitize(tbl, self)
+        channel_desensitize(tbl, cur)
         wait_specs[i] = false
       else
         for _, tbl in ipairs(wait_spec) do
           if tbl ~= true then
-            channel_desensitize(tbl, self)
+            channel_desensitize(tbl, cur)
           end
         end
         wait_specs[i] = false
@@ -701,31 +701,18 @@ function Process:wait(...)
   return table_unpack(wait_specs)
 end
 
---- Schedule a delayed update on a channel.
----
----@param d Duration  How long after now to perform update.
----@param t table     Table to perform update on.
----@param k any       Key of t to perform update on.
----@param v any       Value to assign to t[k].
-function Process:after(d, t, k, v)
-  channel_schedule_update(t, current_time + d, k, v)
-end
-
---- Obtain the current logical time.
----
----@return LogicalTime current_time
-function Process:now()
-  return current_time
-end
-
-function Process:set_active()
+--- TODO: document
+function M.process_set_active()
+  local self = get_running_process()
   if not self.active then
     num_active_inc()
     self.active = true
   end
 end
 
-function Process:set_passive()
+--- TODO: document
+function M.process_set_passive()
+  local self = get_running_process()
   if self.active then
     num_active_dec()
     self.active = false
@@ -735,7 +722,10 @@ end
 --- Resume execution of a process.
 ---@param p Process
 local function process_resume(p)
+  local prev = current_proc
+  current_proc = p
   local ok, err = coroutine.resume(p.cont)
+  current_proc = prev
   if not ok then
     -- TODO: test this
     error(err .. "\n" .. debug.traceback(p.cont))
@@ -780,7 +770,7 @@ function M.next_event_time()
   ---@type Channel|nil
   local c = event_queue:peek()
   if c == nil then
-    return NEVER
+    return never
   end
   return c.earliest
 end
@@ -788,7 +778,7 @@ end
 --- Get the current logical time.
 ---
 ---@return LogicalTime time
-function M.current_time()
+function M.get_time()
   return current_time
 end
 
@@ -799,13 +789,14 @@ end
 ---@param next_time LogicalTime                   What time to advance to
 ---@return          LogicalTime   previous_time # The previous timestamp
 function M.set_time(next_time)
-  if current_time == NEVER and next_time == NEVER then
-    return NEVER
+  if current_time == never and next_time == never then
+    return never
   end
 
   dbg("===== ADVANCING TIME " .. tostring(current_time) .. " -> " .. tostring(next_time) .. " =====")
 
-  assert(current_time < next_time, "Time must advance forwards " .. tostring(current_time) .. "-/->" .. tostring(next_time))
+  assert(current_time < next_time,
+    "Time must advance forwards " .. tostring(current_time) .. "-/->" .. tostring(next_time))
 
   local previous_time = current_time
   current_time = next_time
