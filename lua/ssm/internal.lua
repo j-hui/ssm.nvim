@@ -2,9 +2,9 @@
 local M = {}
 
 local dbg = require("ssm.dbg")
-local Priority = require("ssm.Priority")
-local PriorityQueue = require("ssm.PriorityQueue")
-local Stack = require("ssm.Stack")
+local Priority = require("ssm.lib.Priority")
+local PriorityQueue = require("ssm.lib.PriorityQueue")
+local Stack = require("ssm.lib.Stack")
 
 --- For compatability between Lua 5.1 and 5.2/5.3/5.4
 ---@diagnostic disable-next-line: deprecated
