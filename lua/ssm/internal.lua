@@ -607,34 +607,40 @@ end
 --- In other words, wait(a, {b, c}) will unblock when a is updated, or both
 --- b and c are updated.
 ---
---- TODO: reimplement without clobbering? And remove casts.
----
 ---@param   ... CTable|CTable[]   Wait specification
 ---@return      boolean ...       Whether that item unblocked
 function M.process_wait(...)
   local cur = get_running_process()
-  local wait_specs = { ... }
 
-  dbg(tostring(cur) .. ": waiting on " .. tostring(#wait_specs) .. " channels")
+  dbg(tostring(cur) .. ": waiting on " .. tostring(#{ ... }) .. " channels")
 
-  if #wait_specs == 0 then
-    return
-  end
+  ---@type (CTable|CTable[])[]
+  local wait_specs = {}
 
-  for i, wait_spec in ipairs(wait_specs) do
+  for i, wait_spec in ipairs { ... } do
     if table_has_channel(wait_spec) then
       local tbl = wait_spec
       dbg("Argument: " .. tostring(i) .. "->" .. tostring(tbl))
+
+      wait_specs[i] = wait_spec
       channel_sensitize(tbl, cur)
     else
+      wait_specs[i] = {}
       for j, tbl in ipairs(wait_spec) do
         dbg("Argument: " .. tostring(i) .. "." .. tostring(j) .. "->" .. tostring(tbl))
+
+        wait_specs[i][j] = tbl
         channel_sensitize(tbl, cur)
       end
     end
   end
 
-  ---@cast wait_specs (CTable|true|(CTable|true)[])[]
+  if #wait_specs == 0 then
+    return
+  end
+
+  ---@cast wait_specs (CTable|(CTable|true)[]|true)[]
+  -- (true indicates the table at that position has been updated)
 
   local keep_waiting = true
   while keep_waiting do
@@ -677,7 +683,8 @@ function M.process_wait(...)
     end -- for i, wait_spec in ipairs(wait_specs)
   end -- while keep_waiting
 
-  ---@cast wait_specs (CTable|boolean|(CTable|boolean)[])[]
+  ---@cast wait_specs (CTable|(CTable|true)[]|true|false)[]
+  -- (false indicates the table at that position has not been updated)
 
   for i, wait_spec in ipairs(wait_specs) do
     if wait_spec ~= true then
@@ -697,11 +704,12 @@ function M.process_wait(...)
   end
 
   ---@cast wait_specs boolean[]
+  -- (at this point, everything should either be true or false)
 
   return table_unpack(wait_specs)
 end
 
---- TODO: document
+--- Mark the current running process as active; maintain process ref count.
 function M.process_set_active()
   local self = get_running_process()
   if not self.active then
@@ -710,7 +718,7 @@ function M.process_set_active()
   end
 end
 
---- TODO: document
+--- Mark the current running process as passive; maintain process ref count.
 function M.process_set_passive()
   local self = get_running_process()
   if self.active then
@@ -727,8 +735,7 @@ local function process_resume(p)
   local ok, err = coroutine.resume(p.cont)
   current_proc = prev
   if not ok then
-    -- TODO: test this
-    error(err .. "\n" .. debug.traceback(p.cont))
+    error(string.format("\n%s\nSSM %s:\n%s\n", err, p.cont, debug.traceback(p.cont)))
   end
 end
 

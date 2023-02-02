@@ -7,9 +7,9 @@ function ssm.pause(d)
 end
 
 function ssm.sum(r1, r2, d)
-  ssm.wait { r1, r2 }
+  local v1, v2 = ssm.join { r1, r2 }
   ssm.pause(d)
-  return r1[1] + r2[1]
+  return v1 + v2
 end
 
 function ssm.fib(n)
@@ -17,13 +17,10 @@ function ssm.fib(n)
     ssm.pause(n)
     return n
   end
-  local r1 = ssm.fib:spawn(n - 1)
-  local r2 = ssm.fib:spawn(n - 2)
-  local r3 = ssm.sum:spawn(r1, r2, n)
-
-  ssm.wait { r1, r2, r3 }
-
-  return r3[1]
+  local r1, r2 = ssm.fib:spawn(n - 1), ssm.fib:spawn(n - 2)
+  local result = ssm.sum:spawn(r1, r2)
+  ssm.wait { r1, r2, result }
+  return result
 end
 
 local n = 20

@@ -53,17 +53,23 @@ end
 ---- [[ Routines ]] ----
 
 ---@class Routine
+---
+---@field [1] fun(any): any
+---
 local Routine = {}
 Routine.__index = Routine
 
+--- Call the routine directory, from the same process.
 function Routine:__call(...)
   return self[1](...)
 end
 
+--- Spawn a higher priority thread to run the routine.
 function Routine:spawn(...)
   return internal.process_spawn(self[1], ...)
 end
 
+--- Defer to a lower priority thread to run the routine.
 function Routine:defer(...)
   return internal.process_defer(self[1], ...)
 end
@@ -154,13 +160,15 @@ end
 --- function(self) ... end.
 ---
 ---@generic T
+---@generic R
 ---
----@param entry_point  function           Entry point for SSM execution
----@return LogicalTime completion_time    # When SSM execution completed.
----@return T           return_value       # Return value of the entry point.
-M.start = function(entry_point)
+---@param entry         fun(T...): R        Entry point for SSM execution
+---@param ...           T                   Arguments applied to entry point
+---@return LogicalTime  completion_time     # When SSM execution completed
+---@return R            return_value        # Return value of the entry point
+M.start = function(entry, ...)
   -- Execute first instant
-  local ret = internal.set_start(entry_point)
+  local ret = internal.set_start(entry, { ... })
   internal.run_instant()
 
   -- "Tick" loop
@@ -203,18 +211,37 @@ M.after = lens_create
 ---@type fun(tbl: table, key: any|nil): LogicalTime
 M.last_updated = internal.channel_last_updated
 
+--- Mark the current running process as active.
+---@type fun(): nil
+M.set_active = internal.process_set_active
+
+--- Mark the current running process as passive.
+---@type fun(): nil
+M.set_passive = internal.process_set_passive
+
 --- Wait for one or more channel tables to be updated.
 ---
 ---@type fun(...: table|table[]): boolean ...
 M.wait = internal.process_wait
 
---- TODO: document
----@type fun(): nil
-M.set_active = internal.process_set_active
-
---- TODO: document
----@type fun(): nil
-M.set_passive = internal.process_set_passive
+--- Wait for all return channels to be updated, and unpack the results.
+---
+--- If multiple values are returned on an individual return channel, those
+--- return values are packed into an array.
+---
+---@param tbls  table[]         Return channels
+---@return      any|any[] ...   # Return values
+function M.join(tbls)
+  M.wait(tbls)
+  for i, tbl in ipairs(tbls) do
+    if #tbl == 1 then
+      tbls[i] = tbl[1]
+    else
+      tbls[i] = { M.unpack(tbl) }
+    end
+  end
+  return M.unpack(tbls)
+end
 
 --- Configure the SSM runtime library.
 ---
