@@ -18,9 +18,9 @@ function ssm.fib(n)
     return n
   end
   local r1, r2 = ssm.fib:spawn(n - 1), ssm.fib:spawn(n - 2)
-  local result = ssm.sum:spawn(r1, r2)
+  local result = ssm.sum:spawn(r1, r2, n)
   ssm.wait { r1, r2, result }
-  return result
+  return result[1]
 end
 
 local n = 20
