@@ -306,12 +306,11 @@ end
 ---@return        Channel   new_channel
 local function channel_new(init)
   local chan = {
-    value = {},
     later = {},
     last = {},
     earliest = never,
     triggers = {},
-    __index = channel_getter,
+    __index = {},
     __newindex = channel_setter,
     __pairs = channel_pairs,
     __ipairs = channel_ipairs,
@@ -324,6 +323,8 @@ local function channel_new(init)
   end
 
   local now = current_time
+
+  chan.value = chan.__index
 
   for k, v in pairs(init) do
     chan.value[k], chan.last[k] = v, now
