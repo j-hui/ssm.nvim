@@ -42,9 +42,9 @@ local function refresh_timer()
     return
   end
 
-  uv.update_time()
-  local sleep_time = math.max(core.next_event_time() - uv.now())
-  timer:start(sleep_time, 0, function() end)
+  local sleep_time = math.max(core.next_event_time() - uv.hrtime())
+  -- Unfortunately, luv's timers only support millisecond resolution...
+  timer:start(sleep_time / 1000000, 0, function() end)
 end
 
 local function do_tick()
@@ -60,7 +60,7 @@ end
 function M.wrap_input_stream(stream)
   local chan = core.make_channel_table { data = "", err = nil }
   stream:read_start(function(err, data)
-    local now = uv.now()
+    local now = uv.hrtime()
     if err then
       core.channel_schedule_update(chan, now, "err", err)
       core.channel_schedule_update(chan, now, "data", nil)
@@ -158,12 +158,12 @@ M.start = function(entry, ...)
     ret = core.set_start(function()
       setup_stdio()
       return entry(args)
-    end, nil, uv.now())
+    end, nil, uv.hrtime())
     do_tick()
   end)
 
   ticker:start(function()
-    if uv.now() < core.next_event_time() then
+    if uv.hrtime() < core.next_event_time() then
       -- Spurious wake up, but we are not yet ready to tick.
       return
     end

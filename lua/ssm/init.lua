@@ -8,6 +8,67 @@ M.unpack = lua.unpack
 M.pairs = lua.pairs
 M.ipairs = lua.ipairs
 
+---- [[ Time resolution ]] ----
+
+--- The core library is resolution-agnostic, but for cross-platform accuracy we
+--- will standardize to nanoseconds as our base resolution. Each backend will
+--- need to adjust from nanoseconds accordingly.
+
+---@param t number
+---@return Duration t_nanoseconds
+function M.nsec(t)
+  ---@cast t Duration
+  return t
+end
+
+---@param t number
+---@return Duration t_microseconds
+function M.usec(t)
+  t = t * 1000
+  ---@cast t Duration
+  return t
+end
+
+---@param t number
+---@return Duration t_milliseconds
+function M.msec(t)
+  t = t * 1000 * 1000
+  ---@cast t Duration
+  return t
+end
+
+---@param t number
+---@return Duration t_seconds
+function M.sec(t)
+  t = t * 1000 * 1000 * 1000
+  ---@cast t Duration
+  return t
+end
+
+---@param d Duration|Timestamp
+---@return number nanoseconds
+function M.as_nsec(d)
+  return d
+end
+
+---@param d Duration|Timestamp
+---@return number microseconds
+function M.as_usec(d)
+  return d / 1000
+end
+
+---@param d Duration|Timestamp
+---@return number milliseconds
+function M.as_msec(d)
+  return d / (1000 * 1000)
+end
+
+---@param d Duration|Timestamp
+---@return number seconds
+function M.as_sec(d)
+  return d / (1000 * 1000 * 1000)
+end
+
 ---- [[ Routines ]] ----
 
 ---@class Routine

@@ -1,3 +1,4 @@
+package.path = './?/init.lua;./?.lua;' .. package.path
 local ssm = require("ssm")
 
 function ssm.sig_gen(half_period)

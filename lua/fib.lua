@@ -1,9 +1,9 @@
-package.path = './?/init.lua;' .. package.path
+package.path = './?/init.lua;./?.lua;' .. package.path
 local ssm = require("ssm") { backend = "luv" }
 
 function ssm.pause(d)
   local t = ssm.Channel {}
-  ssm.after(math.max(d, 1), t).val = 1
+  ssm.after(ssm.msec(math.max(d, 1), t)).val = 1
   ssm.wait(t)
 end
 
