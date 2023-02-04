@@ -35,30 +35,8 @@ if not pcall(function() uv = require("luv") end) then
   uv = require("uv")
 end
 
-local timer, ticker
-
-local function refresh_timer()
-  if core.next_event_time() == core.never then
-    return
-  end
-
-  local sleep_time = math.max(core.next_event_time() - uv.hrtime())
-  -- Unfortunately, luv's timers only support millisecond resolution...
-  timer:start(sleep_time / 1000000, 0, function() end)
-end
-
-local function do_tick()
-  core.run_instant()
-
-  if core.num_active() <= 0 then
-    ticker:stop()
-  else
-    refresh_timer()
-  end
-end
-
 function M.wrap_input_stream(stream)
-  local chan = core.make_channel_table { data = "", err = nil }
+  local chan = core.make_channel_table { data = "", err = nil, stream = stream }
   stream:read_start(function(err, data)
     local now = uv.hrtime()
     if err then
@@ -98,7 +76,7 @@ local function output_handler(stream, chan)
 end
 
 function M.wrap_output_stream(stream)
-  local chan = core.make_channel_table { data = "", err = nil }
+  local chan = core.make_channel_table { data = "", err = nil, stream = stream }
   core.process_defer(output_handler, stream, chan)
   return chan
 end
@@ -125,6 +103,39 @@ local function setup_stdio()
 
   M.io.stdout = M.wrap_output_stream(stdout)
 end
+
+local function shutdown_stdio()
+    if not M.io.stdin.stream:is_closing() then
+      M.io.stdin.stream:close()
+    end
+    if not M.io.stdout.stream:is_closing() then
+      M.io.stdout.stream:close()
+    end
+end
+
+local timer, ticker
+
+local function refresh_timer()
+  if core.next_event_time() == core.never then
+    return
+  end
+
+  local sleep_time = math.max(core.next_event_time() - uv.hrtime())
+  -- Unfortunately, luv's timers only support millisecond resolution...
+  timer:start(sleep_time / 1000000, 0, function() end)
+end
+
+local function do_tick()
+  core.run_instant()
+
+  if core.num_active() <= 0 then
+    shutdown_stdio()
+    ticker:stop()
+  else
+    refresh_timer()
+  end
+end
+
 
 --- Start executing SSM from a specified entry point.
 ---
@@ -157,18 +168,27 @@ M.start = function(entry, ...)
     -- For first iteration only, initialize model time to that of uv
     ret = core.set_start(function()
       setup_stdio()
-      return entry(args)
-    end, nil, uv.hrtime())
-    do_tick()
-  end)
 
-  ticker:start(function()
-    if uv.hrtime() < core.next_event_time() then
-      -- Spurious wake up, but we are not yet ready to tick.
-      return
-    end
-    core.set_time(core.next_event_time())
-    do_tick()
+      local entry_ret = { entry(args) }
+
+      return unpack(entry_ret)
+    end, nil, uv.hrtime())
+
+    -- A little bit of callback hell to make sure the first instant runs during
+    -- the prepare phase.
+    ticker:start(function()
+      do_tick()
+
+      ticker:start(function()
+        if uv.hrtime() < core.next_event_time() then
+          -- Spurious wake up, but we are not yet ready to tick.
+          refresh_timer()
+          return
+        end
+        core.set_time(core.next_event_time())
+        do_tick()
+      end)
+    end)
   end)
 
   -- Runs in "default" mode, which blocks until the event loop stops.
