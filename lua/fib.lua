@@ -1,4 +1,5 @@
-local ssm = require("ssm")
+package.path = './?/init.lua;' .. package.path
+local ssm = require("ssm") { backend = "luv" }
 
 function ssm.pause(d)
   local t = ssm.Channel {}

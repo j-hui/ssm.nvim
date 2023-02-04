@@ -61,6 +61,11 @@ local event_queue = PriorityQueue()
 --- Number of active processes. When this hits zero, it's time to stop.
 local num_active = 0
 
+--- The highest and lowest priorities in the system.
+---
+--- @type Priority, Priority
+local prio_highest, prio_lowest
+
 --- Obtain process structure for currently running coroutine thread.
 ---
 ---@return  Process|nil     current_process
@@ -179,6 +184,32 @@ local function num_active_dec()
   num_active = num_active - 1
 end
 
+--- Get a new base priority; initialize prio_highest and prio_lowest.
+---
+---@return Priority base_priority
+local function prio_init()
+  prio_highest = Priority()
+  local prio = prio_highest:insert()
+  prio_lowest = prio:insert()
+  return prio
+end
+
+--- Construct a priority higher than all existing priorities.
+---
+---@return Priority high_priority
+function M.high_priority()
+  return prio_highest:insert()
+end
+
+--- Construct a priority lower than all existing priorities.
+---
+---@return Priority low_priority
+function M.low_priority()
+  local prio = prio_lowest
+  prio_lowest = prio:insert()
+  return prio
+end
+
 ---- [[ Channels ]] ----
 
 ---@class CTable: table
@@ -220,15 +251,6 @@ local function table_has_channel(o)
   return getmetatable(table_get_channel(o)) == Channel
 end
 
---- Getter for channel tables.
----
----@param tbl CTable
----@param k   Key
----@return    any
-local function channel_getter(tbl, k)
-  return table_get_channel(tbl).value[k]
-end
-
 --- Setter for channel tables; schedules sensitive lower priority processes.
 ---
 --- If v is nil (i.e., the caller is deleting the field k), the corresponding
@@ -264,6 +286,8 @@ end
 
 --- Override for channel tables' __pairs() method.
 ---
+--- Exported for compatibility with Lua versions that do not support __pairs().
+---
 ---@generic K
 ---@generic V
 ---
@@ -271,7 +295,7 @@ end
 ---@return fun(table: table<K, V>, i: integer|nil):K, V iterator
 ---@return table<K, V>                                  state
 ---@return nil                                          unused
-local function channel_pairs(tbl)
+function M.channel_pairs(tbl)
   local self = table_get_channel(tbl)
   local f = pairs(self.value)
   return f, tbl, nil
@@ -279,13 +303,15 @@ end
 
 --- Override for channel tables' __ipairs() method.
 ---
+--- Exported for compatibility with Lua versions that do not support __ipairs().
+---
 ---@generic T
 ---
 ---@param tbl T[]           What to iterate over.
 ---@return fun(table: T[], i: integer|nil):integer, T   iterator
 ---@return T[]                                          state
 ---@return nil                                          unused
-local function channel_ipairs(tbl)
+function M.channel_ipairs(tbl)
   local self = table_get_channel(tbl)
   local f = ipairs(self.value)
   return f, tbl, nil
@@ -293,9 +319,11 @@ end
 
 --- Override for channel tables' __len() method.
 ---
+--- Exported for compatibility with Lua versions that do not support __len().
+---
 ---@param   tbl     CTable  The channel table
 ---@return          integer length
-local function channel_len(tbl)
+function M.channel_len(tbl)
   local self = table_get_channel(tbl)
   return #self.value
 end
@@ -312,9 +340,9 @@ local function channel_new(init)
     triggers = {},
     __index = {},
     __newindex = channel_setter,
-    __pairs = channel_pairs,
-    __ipairs = channel_ipairs,
-    __len = channel_len,
+    __pairs = M.channel_pairs,
+    __ipairs = M.channel_ipairs,
+    __len = M.channel_len,
     name = "c" .. dbg.fresh(),
   }
 
@@ -330,6 +358,7 @@ local function channel_new(init)
     chan.value[k], chan.last[k] = v, now
   end
 
+  -- TODO: make this an empty piece of userdata?
   chan.table = setmetatable({}, chan)
 
   setmetatable(chan, Channel)
@@ -412,16 +441,13 @@ end
 
 --- Scheduld a delayed update to a channel table.
 ---
----@param tbl CTable    The channel table to schedule an update to.
----@param d   Duration  How long after now to perform update.
----@param k   Key       The key to at which the delayed update is scheduled.
----@param v   any       The value to update k with.
-function M.channel_schedule_update(tbl, d, k, v)
+---@param tbl CTable      The channel table to schedule an update to.
+---@param t   LogicalTime When to perform update.
+---@param k   Key         The key to at which the delayed update is scheduled.
+---@param v   any         The value to update k with.
+function M.channel_schedule_update(tbl, t, k, v)
   local self = table_get_channel(tbl)
-  assert(d > 0, "Delay must be a non-zero duration")
-
-  local t = current_time + d
-
+  assert(t > current_time, "Schedule time must be in the future")
   self.later[k] = { t, v }
   self.earliest = math.min(self.earliest, t)
 
@@ -482,15 +508,19 @@ function Process:__tostring()
   return self.name
 end
 
---- Construct a new Process.
+--- Construct a new Process, without scheduling it for execution.
 ---
----@param func  fun(any): any   Function to execute in process.
----@param args  any[]           Table of arguments to routine.
----@param rtbl  CTable|nil      Process status channel.
----@param prio  Priority        Priority of the process.
----@return      Process         new_process
-local function process_new(func, args, rtbl, prio)
-  local proc = { rtbl = rtbl, prio = prio, active = true, name = "p" .. dbg.fresh() }
+--- This function shouldn't be exposed to the user API, but it may be useful for
+--- backends.
+---
+---@param func    fun(any): any   Function to execute in process.
+---@param args    any[]           Table of arguments to routine.
+---@param rtbl    CTable|nil      Return channel.
+---@param prio    Priority        Priority of the process.
+---@param active  boolean         Whether to create as an active process.
+---@return        Process         new_process
+local function process_new(func, args, rtbl, prio, active)
+  local proc = { rtbl = rtbl, prio = prio, active = active, name = "p" .. dbg.fresh() }
 
   -- proc becomes the self of func
   proc.cont = coroutine.create(function()
@@ -507,6 +537,7 @@ local function process_new(func, args, rtbl, prio)
     if proc.rtbl then
       for i, v in ipairs(r) do
         pdbg("Terminated.", "Assigning return value: [" .. tostring(i) .. "] " .. tostring(v))
+        -- TODO: consider optimizing this using rawset()
         proc.rtbl[i] = v
       end
 
@@ -528,7 +559,9 @@ local function process_new(func, args, rtbl, prio)
 
   setmetatable(proc, Process)
 
-  num_active_inc()
+  if proc.active then
+    num_active_inc()
+  end
 
   return proc
 end
@@ -564,8 +597,9 @@ function M.process_spawn(func, ...)
   local prio = cur.prio
   cur.prio = cur.prio:insert()
 
+  -- TODO: optimize this: we probably could just process_resume() directly
   push_process(cur)
-  push_process(process_new(func, args, rtbl, prio))
+  push_process(process_new(func, args, rtbl, prio, true))
 
   coroutine.yield()
 
@@ -589,9 +623,14 @@ function M.process_defer(func, ...)
   local chan = M.make_channel_table({ terminated = false })
   local prio = cur.prio:insert()
 
-  push_process(process_new(func, args, chan, prio))
+  push_process(process_new(func, args, chan, prio, true))
 
   return chan
+end
+
+function M.process_make_handler(func, args, prio)
+
+
 end
 
 --- Wait for updates on some number of channel tables.
@@ -757,7 +796,7 @@ end
 ---@return LogicalTime          event_time
 ---@return nil                  unused
 local function scheduled_events()
-  return dequeue_event_at, M.next_event_time(), nil
+  return dequeue_event_at, current_time, nil
 end
 
 --- Obtain number of active processes.
@@ -812,6 +851,8 @@ function M.set_time(next_time)
 end
 
 --- Execute an instant. Performs all scheduled updates, then executes processes.
+---
+--- Nop if there is nothing scheduled for the current instant.
 function M.run_instant()
   for c in scheduled_events() do
     channel_do_update(c)
@@ -830,15 +871,15 @@ end
 ---@generic T
 ---@generic R
 ---
----@param entry_point fun(T...): R      The entry point function.
+---@param entry_point fun(T...): R|nil  The entry point function.
 ---@param entry_args  T[]|nil           Arguments given to entry_point.
 ---@param start_time  LogicalTime|nil   What to initialize current_time to
 ---@return            CTable            return_channel
 function M.set_start(entry_point, entry_args, start_time)
   -- TODO: reset process tables etc.?
   current_time = start_time or 0
-  local ret = M.make_channel_table({ terminated = false })
-  push_process(process_new(entry_point, entry_args or {}, ret, Priority()))
+  local ret = M.make_channel_table { terminated = false }
+  push_process(process_new(entry_point, entry_args or {}, ret, prio_init(), true))
   return ret
 end
 

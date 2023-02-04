@@ -97,7 +97,7 @@ Lens.__getmetatable = false
 ---@param v     any
 function Lens.__newindex(lens, k, v)
   local tbl, d = lens[1], lens[2]
-  core.channel_schedule_update(tbl, d, k, v)
+  core.channel_schedule_update(tbl, core.get_time() + d, k, v)
 end
 
 --- Create an assignable object that schedule updates on tbl after d.
@@ -106,15 +106,28 @@ end
 ---@param tbl table       The channel table to assign to.
 ---@return    Lens        assignable_table
 local function lens_create(d, tbl)
+  assert(d > 0, "Delay must be positive")
   return setmetatable({ tbl, d }, Lens)
 end
 
----- [[ SSM user API ]] ----
+---- [[ Backend management ]] ----
+
+local function set_backend(mod, backend_name)
+  local backend = require("ssm.backend." .. backend_name)
+  rawset(mod, "start", backend.start)
+  rawset(mod, "io", backend.io)
+  rawset(mod, "resolution", backend.resolution)
+end
+
+-- Default to simulation backend
+set_backend(M, "simulation")
 
 --- Start executing SSM from a specified entry point.
 ---
 ---@type fun(entry: fun(...): any, ...: any): LogicalTime, ...any
-M.start = require("ssm.backend.simulation").start
+M.start = M.start -- nop (for documentation purposes)
+
+---- [[ SSM user API ]] ----
 
 --- Timestamp representing the end of time; larger than any other timestamp.
 M.never = core.never
@@ -160,7 +173,7 @@ M.wait = core.process_wait
 function M.join(tbls)
   M.wait(tbls)
   for i, tbl in ipairs(tbls) do
-    if #tbl == 1 then
+    if core.channel_len(tbl) == 1 then
       tbls[i] = tbl[1]
     else
       tbls[i] = { M.unpack(tbl) }
@@ -196,7 +209,7 @@ local function configure(mod, opts)
   end
 
   if opts.backend then
-    M.start = require("ssm.backend." .. opts.backend)
+    set_backend(mod, opts.backend)
   end
 
   return mod
