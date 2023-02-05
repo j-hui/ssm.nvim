@@ -10,8 +10,6 @@
     - Run idle handles
 
     - Run prepare handles
-        + we will set time here (?)
-        + we will tick here
 
     |===== Poll for I/O AKA block =====|
 
@@ -25,6 +23,7 @@
   ]]
 
 local M = {}
+M.io = {}
 
 local core = require("ssm.core")
 local lua = require("ssm.lib.lua")
@@ -35,31 +34,65 @@ if not pcall(function() uv = require("luv") end) then
   uv = require("uv")
 end
 
-function M.wrap_input_stream(stream)
-  local chan = core.make_channel_table { data = "", err = nil, stream = stream }
-  stream:read_start(function(err, data)
-    local now = uv.hrtime()
-    if err then
-      core.channel_schedule_update(chan, now, "err", err)
-      core.channel_schedule_update(chan, now, "data", nil)
-      stream:close()
-    elseif data then
-      core.channel_schedule_update(chan, now, "data", data)
-    else
-      core.channel_schedule_update(chan, now, "data", nil)
-      stream:close()
+local timer, try_tick, start_time
+
+local function set_wallclock()
+  start_time = uv.hrtime()
+end
+
+local function get_wallclock()
+  return uv.hrtime() - start_time
+end
+
+local function refresh_timer()
+  if core.next_event_time() == core.never then
+    return
+  end
+
+  local sleep_time = math.max(core.next_event_time() - get_wallclock())
+  -- Unfortunately, luv's timers only support millisecond resolution...
+  sleep_time = sleep_time / 1000000
+  sleep_time = math.max(sleep_time, 0)
+  timer:start(sleep_time, 0, try_tick)
+end
+
+local function do_tick()
+  core.run_instant()
+  if core.num_active() <= 0 then
+    -- How to close low priority stuff?
+  else
+    refresh_timer()
+  end
+end
+
+function try_tick()
+  if get_wallclock() < core.next_event_time() then
+    -- Spurious wake up, but we are not yet ready to tick.
+    refresh_timer()
+    return
+  end
+  core.set_time(core.next_event_time())
+  do_tick()
+end
+
+local function input_handler(chan)
+  core.process_set_passive() -- Should be redundant
+  while true do
+    core.process_wait(chan)
+    if not chan.data then
+      if not chan.stream:is_closing() then
+        chan.stream:close()
+      end
+      return
     end
-  end)
-  return chan
+  end
 end
 
 local function output_handler(stream, chan)
-  core.process_set_passive()
+  core.process_set_passive() -- Should be redundant
   local should_continue = true
 
   while should_continue do
-    core.process_wait(chan)
-
     if not should_continue or chan.data == nil then
       stream:close()
       return
@@ -72,70 +105,94 @@ local function output_handler(stream, chan)
         should_continue = false
       end
     end)
+
+    core.process_wait(chan)
   end
 end
 
-function M.wrap_output_stream(stream)
-  local chan = core.make_channel_table { data = "", err = nil, stream = stream }
-  core.process_defer(output_handler, stream, chan)
+function M.io.wrap_input_stream(stream)
+  ---@type table
+  local chan = core.make_channel_table {
+    data = "",
+    err = nil,
+    stream = stream
+  }
+
+  local function input_callback(err, data)
+    local now = get_wallclock()
+    ---@cast now LogicalTime
+    if err then
+      core.channel_schedule_update(chan, now, "err", err)
+      core.channel_schedule_update(chan, now, "data", nil)
+      stream:close()
+    elseif data then
+      core.channel_schedule_update(chan, now, "data", data)
+    else
+      core.channel_schedule_update(chan, now, "data", nil)
+      stream:close()
+    end
+    core.set_time(now)
+    do_tick()
+  end
+
+  stream:read_start(input_callback)
+  core.process_make_handler(input_handler, { chan }, false)
+
   return chan
 end
 
-local function setup_stdio()
-  -- Setup stdin
-  local stdin
-  if uv.guess_handle(0) == "tty" then
-    stdin = uv.new_tty(0, true)
+function M.io.wrap_output_stream(stream)
+  local chan = core.make_channel_table { data = "", err = nil, stream = stream }
+  core.process_make_handler(output_handler, { stream, chan }, false)
+  return chan
+end
+
+function M.open_stream_fd(fd, read, fd_type)
+  local stream_type = uv.guess_handle(fd)
+  if fd_type and stream_type ~= fd_type then
+    return nil
+  end
+
+  local stream
+  if stream_type == "tty" then
+    stream = uv.new_tty(fd, read)
+  elseif stream_type == "pipe" then
+    stream = uv.new_pipe()
+    stream:open(fd)
   else
-    stdin = uv.new_pipe()
-    stdin:open(0)
+    return nil
   end
 
-  M.io.stdin = M.wrap_input_stream(stdin)
-
-  local stdout
-  if uv.guess_handle(1) == "tty" then
-    stdout = uv.new_tty(1, false)
+  if read then
+    return M.io.wrap_input_stream(stream)
   else
-    stdout = uv.new_pipe()
-    stdout:open(1)
-  end
-
-  M.io.stdout = M.wrap_output_stream(stdout)
-end
-
-local function shutdown_stdio()
-    if not M.io.stdin.stream:is_closing() then
-      M.io.stdin.stream:close()
-    end
-    if not M.io.stdout.stream:is_closing() then
-      M.io.stdout.stream:close()
-    end
-end
-
-local timer, ticker
-
-local function refresh_timer()
-  if core.next_event_time() == core.never then
-    return
-  end
-
-  local sleep_time = math.max(core.next_event_time() - uv.hrtime())
-  -- Unfortunately, luv's timers only support millisecond resolution...
-  timer:start(sleep_time / 1000000, 0, function() end)
-end
-
-local function do_tick()
-  core.run_instant()
-
-  if core.num_active() <= 0 then
-    shutdown_stdio()
-    ticker:stop()
-  else
-    refresh_timer()
+    return M.io.wrap_output_stream(stream)
   end
 end
 
+local stdin_chan
+function M.io.get_stdin(tty_type)
+  if not stdin_chan then
+    stdin_chan = M.open_stream_fd(0, true, tty_type)
+  end
+  return stdin_chan
+end
+
+local stdout_chan
+function M.io.get_stdout(tty_type)
+  if not stdout_chan then
+    stdout_chan = M.open_stream_fd(1, false, tty_type)
+  end
+  return stdout_chan
+end
+
+local stderr_chan
+function M.io.get_stderr(tty_type)
+  if not stderr_chan then
+    stderr_chan = M.open_stream_fd(2, false, tty_type)
+  end
+  return stderr_chan
+end
 
 --- Start executing SSM from a specified entry point.
 ---
@@ -159,36 +216,13 @@ M.start = function(entry, ...)
   -- timer:start() with the second argument (repeat) set to 0.
   timer = uv.new_timer()
 
-  -- Instants will run in libuv's prepare phase.
-  ticker = uv.new_prepare()
-
   -- This first invocation will execute as soon as we execute uv.run(), and
   -- initialize
   timer:start(0, 0, function()
-    -- For first iteration only, initialize model time to that of uv
-    ret = core.set_start(function()
-      setup_stdio()
-
-      local entry_ret = { entry(args) }
-
-      return unpack(entry_ret)
-    end, nil, uv.hrtime())
-
-    -- A little bit of callback hell to make sure the first instant runs during
-    -- the prepare phase.
-    ticker:start(function()
-      do_tick()
-
-      ticker:start(function()
-        if uv.hrtime() < core.next_event_time() then
-          -- Spurious wake up, but we are not yet ready to tick.
-          refresh_timer()
-          return
-        end
-        core.set_time(core.next_event_time())
-        do_tick()
-      end)
-    end)
+    set_wallclock()
+    -- Note that we initialize model time to 0
+    ret = core.set_start(entry, args, 0)
+    do_tick()
   end)
 
   -- Runs in "default" mode, which blocks until the event loop stops.
@@ -199,14 +233,5 @@ M.start = function(entry, ...)
 
   return core.get_time(), lua.unpack(ret)
 end
-
--- For I/O, we want a function that will transform a stream_handle_t to
--- a channel table.  Exactly what happens with that channel table depends on
--- whether it used for reading, writing, or high priority writing.
-
-M.io = {}
--- M.io.stdin
--- M.io.stdout
--- M.io.stderr
 
 return M

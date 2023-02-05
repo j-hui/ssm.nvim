@@ -197,14 +197,14 @@ end
 --- Construct a priority higher than all existing priorities.
 ---
 ---@return Priority high_priority
-function M.high_priority()
+local function make_high_priority()
   return prio_highest:insert()
 end
 
 --- Construct a priority lower than all existing priorities.
 ---
 ---@return Priority low_priority
-function M.low_priority()
+local function make_low_priority()
   local prio = prio_lowest
   prio_lowest = prio:insert()
   return prio
@@ -628,9 +628,18 @@ function M.process_defer(func, ...)
   return chan
 end
 
-function M.process_make_handler(func, args, prio)
-
-
+--- Create a process with either the highest priority or the lowest priority.
+---
+--- This should only be used to make I/Os for facilitating I/O.
+---
+---@generic T
+---
+---@param func      fun(T...)     The function the process should run.
+---@param args      T[]           Arguments given to func.
+---@param high_prio boolean|nil   Whether handler should be high priority.
+function M.process_make_handler(func, args, high_prio)
+  local prio = high_prio and make_high_priority() or make_low_priority()
+  enqueue_process(process_new(func, args, nil, prio, false))
 end
 
 --- Wait for updates on some number of channel tables.

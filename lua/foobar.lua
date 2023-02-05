@@ -16,7 +16,7 @@ end
 function ssm.main()
   local start_time = ssm.now()
   local t = ssm.Channel { val = 0 } -- Create channel table with { val = 0 }
-  ssm.after(ssm.msec(300), t).val = 1 -- Delayed assignment of a.val = 1
+  ssm.after(ssm.msec(500), t).val = 1 -- Delayed assignment of a.val = 1
   ssm.wait { ssm.bar:spawn(t), ssm.foo:spawn(t) } -- fork/join on bar() and foo()
 
   local end_time = ssm.now()
