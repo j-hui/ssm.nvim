@@ -2,22 +2,16 @@ package.path = './?/init.lua;./?.lua;' .. package.path
 local ssm = require("ssm") { backend = "luv" }
 local uv = require("luv")
 
-local bouncing_ball = {
-  "⠋",
-  "⠙",
-  "⠹",
-  "⠸",
-  "⠼",
-  "⠴",
-  "⠦",
-  "⠧",
-  "⠇",
-  "⠏",
-}
+local spinners = require("spinners")
+
+local animations = {}
+for _, s in pairs(spinners) do
+  table.insert(animations, s)
+end
 
 function ssm.clock(clk)
   while clk.period do
-    ssm.after(clk.period, clk).tick = true
+    clk:after(clk.period, { tick = true })
     ssm.wait(clk)
   end
 end
@@ -33,20 +27,29 @@ function ssm.main()
   assert(stdin, "could not open stdin as tty")
   assert(stdout, "could not open stdout as tty")
 
-  -- NOTE: this puts the terminal in raw mode, which disables terminal handling
-  -- of Ctrl-c, Ctrl-z, etc, so it will seem unresponsive unless the terminal is
-  -- reset using tty_reset_mode().
+  -- NOTE: this puts the terminal in raw mode to handle keystrokes immediately,
+  -- i.e., to prevent the terminal from buffering stdin until <CR> or <C-d>.
   --
-  -- We enable raw mode here because we want to handle keystrokes immediately,
-  -- and also so that we don't echo them.
+  -- However, this also disables terminal handling of <C-c>, <C-z>, etc., and
+  -- also turns of terminal echo, so we need to handle these manually.
   stdin.stream:set_mode(1)
 
   local clk = make_clock(ssm.msec(100))
-  local idx = 1
+  local frame = 1
+  local animation = 1
 
-  stdout.data = "Press j/k to decrease/increase speed; press q to exit.\n"
+  stdout.data = [[
+Mappings:
 
-  for _ = 0, 1000 do
+  j/<C-d>   decrease frame rate
+  k/<C-u>   increase frame rate
+  h         previous animation
+  l         next animation
+  q/<C-c>   exit
+
+  ]] .. "\27[?25l"
+
+  while true do
     local clk_updated, stdin_updated = ssm.wait(clk, stdin)
 
     if not stdin.data then
@@ -54,18 +57,39 @@ function ssm.main()
     end
 
     if stdin_updated then
-      if stdin.data == "j" then
+      local byte = string.byte(stdin.data)
+      if stdin.data == "j"
+          or byte == 4 -- ctrl-d
+      then
         clk.period = clk.period * 2
-      elseif stdin.data == "k" then
+      elseif stdin.data == "k"
+          or byte == 21 -- ctrl-u
+      then
         clk.period = math.max(clk.period / 2, ssm.usec(100))
-      elseif stdin.data == "q" then
+      elseif stdin.data == "h"
+      then
+        animation = animation - 1
+        animation = animation == 0 and #animations or animation
+        frame = 1
+      elseif stdin.data == "l"
+      then
+        animation = (animation % #animations) + 1
+        frame = 1
+      elseif stdin.data == "q"
+          or byte == 26 -- ctrl-z
+          or byte == 3 -- ctrl-c
+      then
         break
       end
     end
 
     if clk_updated then
-      stdout.data = "\r" .. bouncing_ball[idx]
-      idx = (idx % #bouncing_ball) + 1
+      -- ANSI sequence to clear line and revert cursor to beginning
+      -- before printing animation frame
+      local clear_line = "\27[2K\r"
+      local info = string.format("Frame period: %9dus", ssm.as_usec(clk.period))
+      stdout.data = string.format("%s%s\t%s",clear_line, info, animations[animation][frame])
+      frame = (frame % #animations[animation]) + 1
     end
   end
 

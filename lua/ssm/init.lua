@@ -139,37 +139,26 @@ local function routine_create(f)
   return setmetatable({ f }, Routine)
 end
 
----- [[ Channel Lenses ]] ----
+---- [[ Channel methods ]] ----
 
----@class Lens
----
----@field [1] table
----@field [2] Duration
-local Lens = {}
-Lens.__index = Lens
-
--- Lenses seem rife for misuse; lock down the metatable to prevent mischief.
-Lens.__getmetatable = false
-
---- Schedule a delayed update to a key of the enclosed channel table.
----
----@param lens  Lens
----@param k     any
----@param v     any
-function Lens.__newindex(lens, k, v)
-  local tbl, d = lens[1], lens[2]
-  core.channel_schedule_update(tbl, core.get_time() + d, k, v)
+function M.after(self, d, kvs)
+  for k, v in M.pairs(kvs) do
+    core.channel_schedule_update(self, core.get_time() + d, k, v)
+  end
 end
 
---- Create an assignable object that schedule updates on tbl after d.
----
----@param d   Duration    How long after current time to assign to tbl.
----@param tbl table       The channel table to assign to.
----@return    Lens        assignable_table
-local function lens_create(d, tbl)
-  assert(d > 0, "Delay must be positive")
-  return setmetatable({ tbl, d }, Lens)
+function M.get(self)
+  return self[1]
 end
+
+function M.set(self, v)
+  self[1] = v
+end
+
+--- Obtain the last time a channel table was updated.
+---
+---@type fun(tbl: table, key: any|nil): LogicalTime
+M.last_updated = core.channel_last_updated
 
 ---- [[ Backend management ]] ----
 
@@ -198,18 +187,18 @@ M.now = core.get_time
 
 --- Create a channel table from an initial value.
 ---
----@type fun(init: table): table
-M.Channel = core.make_channel_table
-
---- Create a lens object that can be assigned to schedule delayed assignments.
+---@generic T table
 ---
----@type fun(delay: Duration, tbl: table): Lens
-M.after = lens_create
-
---- Obtain the last time a channel table was updated.
----
----@type fun(tbl: table, key: any|nil): LogicalTime
-M.last_updated = core.channel_last_updated
+---@param   init        T             Table to initialize channel table with.
+---@param   no_clobber  boolean|nil   Set to falsy to prevent clobbering init.
+---@return              T             new_channel_table
+function M.Channel(init, no_clobber)
+  if not no_clobber then
+    init.after = M.after
+    init.last_updated = M.last_updated
+  end
+  return core.make_channel_table(init)
+end
 
 --- Mark the current running process as active.
 ---@type fun(): nil

@@ -3,7 +3,7 @@ local ssm = require("ssm") { backend = "luv" }
 
 function ssm.pause(d)
   local t = ssm.Channel {}
-  ssm.after(ssm.msec(math.max(d, 1)), t).val = 1
+  t:after(ssm.msec(math.max(d, 1)), { [1] = 1 })
   ssm.wait(t)
 end
 
@@ -25,7 +25,7 @@ function ssm.fib(n)
 end
 
 local n = 20
-local t, v = ssm.start(function() return ssm.fib(n) end)
+local t, v = ssm.start(ssm.fib, n)
 
 print("computed fib(" .. tostring(n) .. "): " .. tostring(v))
 print("terminated at time: " .. tostring(ssm.as_msec(t)))
