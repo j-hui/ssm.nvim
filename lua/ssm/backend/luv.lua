@@ -58,10 +58,10 @@ end
 
 local function do_tick()
   core.run_instant()
-  if core.num_active() <= 0 then
-    -- How to close low priority stuff?
-  else
+  if core.num_active() > 0 then
     refresh_timer()
+  else
+    uv.stop()
   end
 end
 

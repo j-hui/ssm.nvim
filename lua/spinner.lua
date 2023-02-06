@@ -47,7 +47,7 @@ Mappings:
   l         next animation
   q/<C-c>   exit
 
-  ]] .. "\27[?25l" -- ANSI code to hide cursor
+]] .. "\27[?25l" -- ANSI code to hide cursor
 
   while true do
     local clk_updated, stdin_updated = ssm.wait(clk, stdin)
