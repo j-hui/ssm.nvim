@@ -3,7 +3,7 @@ local ssm = require("ssm") { backend = "luv" }
 
 function ssm.pause(d)
   local t = ssm.Channel {}
-  t:after(ssm.msec(math.max(d, 1)), { [1] = 1 })
+  t:after(ssm.msec(d), { [1] = 1 })
   ssm.wait(t)
 end
 
@@ -15,7 +15,7 @@ end
 
 function ssm.fib(n)
   if n < 2 then
-    ssm.pause(n)
+    ssm.pause(1)
     return n
   end
   local r1, r2 = ssm.fib:spawn(n - 1), ssm.fib:spawn(n - 2)
