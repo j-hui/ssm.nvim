@@ -8,9 +8,9 @@ function ssm.pause(d)
 end
 
 function ssm.sum(r1, r2, d)
-  local v1, v2 = ssm.join { r1, r2 }
+  ssm.wait { r1, r2 }
   ssm.pause(d)
-  return v1 + v2
+  return r1[1] + r2[1]
 end
 
 function ssm.fib(n)
@@ -18,7 +18,8 @@ function ssm.fib(n)
     ssm.pause(1)
     return n
   end
-  local r1, r2 = ssm.fib:spawn(n - 1), ssm.fib:spawn(n - 2)
+  local r1 = ssm.fib:spawn(n - 1)
+  local r2 = ssm.fib:spawn(n - 2)
   local result = ssm.sum:spawn(r1, r2, n)
   ssm.wait { r1, r2, result }
   return result[1]
@@ -27,5 +28,6 @@ end
 local n = 20
 local t, v = ssm.start(ssm.fib, n)
 
-print("computed fib(" .. tostring(n) .. "): " .. tostring(v))
-print("terminated at time: " .. tostring(ssm.as_msec(t)))
+print(("fib(%d) => %d"):format(n, v))
+t = ssm.as_msec(t)
+print(("Completed in %.2fms"):format(t))
