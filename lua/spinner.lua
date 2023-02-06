@@ -34,7 +34,7 @@ function ssm.main()
   -- also turns of terminal echo, so we need to handle these manually.
   stdin.stream:set_mode(1)
 
-  local clk = make_clock(ssm.msec(500))
+  local clk = make_clock(ssm.msec(200))
   local frame = 1
   local animation = 1
 
