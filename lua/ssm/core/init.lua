@@ -380,7 +380,7 @@ end
 local function channel_do_update(self)
   local next_earliest = never
 
-  assert(self.earliest == current_time, "Updating at the right time")
+  assert(self.earliest == current_time, "Not updating at the right time")
   local updated_keys = {}
 
   for k, e in pairs(self.later) do
@@ -403,6 +403,11 @@ local function channel_do_update(self)
   end
 
   self.triggers = {}
+
+  -- Need to reschedule self for other queued updates
+  if self.earliest ~= M.never then
+    schedule_event(self)
+  end
 end
 
 --- Sensitize a process to updates on a channel table.
@@ -448,8 +453,23 @@ end
 function M.channel_schedule_update(tbl, t, k, v)
   local self = table_get_channel(tbl)
   assert(t > current_time, "Schedule time must be in the future")
-  self.later[k] = { t, v }
-  self.earliest = math.min(self.earliest, t)
+
+  -- Updating the self.earliest field gets tricky if:
+  -- - we're overwriting a scheduled update to a key, AND
+  -- - we're changing it to a later update time, AND
+  -- - the key we're overwriting was the earliest.
+  if self.later[k] and self.later[k][1] < t and self.later[k][1] == self.earliest then
+    self.later[k] = { t, v }
+    -- We need to do a linear search for the earliest scheduled update time
+    self.earliest = M.never
+    for _, update in pairs(self.later) do
+      self.earliest = math.min(self.earliest, update[1])
+    end
+  else
+    -- Otherwise, we can safely fallback to the common case
+    self.later[k] = { t, v }
+    self.earliest = math.min(self.earliest, t)
+  end
 
   schedule_event(self)
 end

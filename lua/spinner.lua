@@ -34,7 +34,7 @@ function ssm.main()
   -- also turns of terminal echo, so we need to handle these manually.
   stdin.stream:set_mode(1)
 
-  local clk = make_clock(ssm.msec(100))
+  local clk = make_clock(ssm.msec(500))
   local frame = 1
   local animation = 1
 
@@ -47,7 +47,7 @@ Mappings:
   l         next animation
   q/<C-c>   exit
 
-  ]] .. "\27[?25l"
+  ]] .. "\27[?25l" -- ANSI code to hide cursor
 
   while true do
     local clk_updated, stdin_updated = ssm.wait(clk, stdin)
@@ -65,7 +65,8 @@ Mappings:
       elseif stdin.data == "k"
           or byte == 21 -- ctrl-u
       then
-        clk.period = math.max(clk.period / 2, ssm.usec(100))
+        -- Stay just above 1ms, the smallest period supported by luv
+        clk.period = math.max(clk.period / 2, ssm.usec(1050))
       elseif stdin.data == "h"
       then
         animation = animation - 1
@@ -87,8 +88,9 @@ Mappings:
       -- ANSI sequence to clear line and revert cursor to beginning
       -- before printing animation frame
       local clear_line = "\27[2K\r"
+      local time = string.format("%9dus", ssm.as_usec(ssm.now()))
       local info = string.format("Frame period: %9dus", ssm.as_usec(clk.period))
-      stdout.data = string.format("%s%s\t%s",clear_line, info, animations[animation][frame])
+      stdout.data = string.format("%s%s\t%s\t%s", clear_line, time, info, animations[animation][frame])
       frame = (frame % #animations[animation]) + 1
     end
   end
