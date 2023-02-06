@@ -131,7 +131,13 @@ function M.io.wrap_input_stream(stream)
       core.channel_schedule_update(chan, now, "data", nil)
       stream:close()
     end
-    core.set_time(now)
+    -- NOTE: We don't need to check get_wallclock() < core.next_event_time()
+    -- here like in try_tick(), because we just scheduled an event for
+    -- a timestamp that is now already in the past.
+    --
+    -- However, it might not be the earliest event in the event queue, so we
+    -- cannot core.set_time(now).
+    core.set_time(core.next_event_time())
     do_tick()
   end
 

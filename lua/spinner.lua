@@ -52,11 +52,11 @@ Mappings:
   while true do
     local clk_updated, stdin_updated = ssm.wait(clk, stdin)
 
-    if not stdin.data then
-      break
-    end
-
     if stdin_updated then
+      if not stdin.data then
+        break
+      end
+
       local byte = string.byte(stdin.data)
       if stdin.data == "j"
           or byte == 4 -- ctrl-d
@@ -88,7 +88,7 @@ Mappings:
       -- ANSI sequence to clear line and revert cursor to beginning
       -- before printing animation frame
       local clear_line = "\27[2K\r"
-      local time = string.format("%9dus", ssm.as_usec(ssm.now()))
+      local time = string.format("Time: %9dus", ssm.as_usec(ssm.now()))
       local info = string.format("Frame period: %9dus", ssm.as_usec(clk.period))
       stdout.data = string.format("%s%s\t%s\t%s", clear_line, time, info, animations[animation][frame])
       frame = (frame % #animations[animation]) + 1
