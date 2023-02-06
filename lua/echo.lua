@@ -5,7 +5,7 @@ local ssm = require("ssm") { backend = "luv" }
 
 function ssm.pause(d)
   local t = ssm.Channel {}
-  t:after(ssm.msec(math.max(d, 1)), { [1] = 1 })
+  t:after(ssm.msec(d), { [1] = 1 })
   ssm.wait(t)
 end
 
