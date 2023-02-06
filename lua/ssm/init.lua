@@ -139,6 +139,14 @@ local function routine_create(f)
   return setmetatable({ f }, Routine)
 end
 
+---@generic T
+---@type fun(fun: fun(T...), T...): table
+M.spawn = core.process_spawn
+
+---@generic T
+---@type fun(fun: fun(T...), T...): table
+M.defer = core.process_defer
+
 ---- [[ Channel methods ]] ----
 
 function M.after(self, d, kvs)
