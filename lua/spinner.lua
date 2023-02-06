@@ -88,8 +88,8 @@ Mappings:
       -- ANSI sequence to clear line and revert cursor to beginning
       -- before printing animation frame
       local clear_line = "\27[2K\r"
-      local time = string.format("Time: %9dus", ssm.as_usec(ssm.now()))
-      local info = string.format("Frame period: %9dus", ssm.as_usec(clk.period))
+      local time = string.format("Time: %9.2fus", ssm.as_usec(ssm.now()))
+      local info = string.format("Frame period: %9.2fus", ssm.as_usec(clk.period))
       stdout.data = string.format("%s%s\t%s\t%s", clear_line, time, info, animations[animation][frame])
       frame = (frame % #animations[animation]) + 1
     end

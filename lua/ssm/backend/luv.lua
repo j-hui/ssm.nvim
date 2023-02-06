@@ -51,7 +51,7 @@ local function refresh_timer()
 
   local sleep_time = math.max(core.next_event_time() - get_wallclock())
   -- Unfortunately, luv's timers only support millisecond resolution...
-  sleep_time = sleep_time / 1000000
+  sleep_time = math.floor(sleep_time / 1000000)
   sleep_time = math.max(sleep_time, 0)
   timer:start(sleep_time, 0, try_tick)
 end
