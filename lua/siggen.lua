@@ -12,11 +12,11 @@ end
 function ssm.sig_ctl(up, down, ctl)
   ssm.set_passive()
   while true do
-    local up_signaled, down_signaled = ssm.wait(up, down)
-    if up_signaled and not down_signaled then
+    local did_up, did_down = ssm.wait(up, down)
+    if did_up and not did_down then
       -- Halve the period to increase the frequency
       ctl.period = ctl.period / 2
-    elseif down_signaled and not up_signaled then
+    elseif did_down and not did_up then
       -- Double the period to decrease the frequency
       ctl.period = ctl.period * 2
     end
