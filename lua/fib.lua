@@ -1,16 +1,11 @@
 package.path = './?/init.lua;./?.lua;' .. package.path
 local ssm = require("ssm") { backend = "luv" }
+local uv = require("luv")
 
 function ssm.pause(d)
   local t = ssm.Channel {}
-  t:after(ssm.msec(d), { [1] = 1 })
+  t:after(ssm.msec(d), { go = false })
   ssm.wait(t)
-end
-
-function ssm.sum(r1, r2, d)
-  ssm.wait { r1, r2 }
-  ssm.pause(d)
-  return r1[1] + r2[1]
 end
 
 function ssm.fib(n)
@@ -20,14 +15,19 @@ function ssm.fib(n)
   end
   local r1 = ssm.fib:spawn(n - 1)
   local r2 = ssm.fib:spawn(n - 2)
-  local result = ssm.sum:spawn(r1, r2, n)
-  ssm.wait { r1, r2, result }
-  return result[1]
+  ssm.wait { r1, r2, ssm.pause:spawn(n) }
+  return r1[1] + r2[1]
 end
 
-local n = 20
-local t, v = ssm.start(ssm.fib, n)
+local n = 10
 
-print(("fib(%d) => %d"):format(n, v))
-t = ssm.as_msec(t)
-print(("Completed in %.2fms"):format(t))
+ssm.start(function()
+  local v = ssm.fib(n)
+
+  print(("fib(%d) => %d"):format(n, v))
+  --> fib(10) => 55
+
+  local t = ssm.as_msec(ssm.now())
+  print(("Completed in %.2fms"):format(t))
+  --> Completed in 10.00ms
+end)
