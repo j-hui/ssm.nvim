@@ -510,6 +510,18 @@ end
 
 ---- [[ Processes ]] ----
 
+--- Resume execution of a process.
+---@param p Process
+local function process_resume(p)
+  local prev = current_proc
+  current_proc = p
+  local ok, err = coroutine.resume(p.cont)
+  current_proc = prev
+  if not ok then
+    error(string.format("\n%s\nSSM %s:\n%s\n", err, p.cont, debug.traceback(p.cont)))
+  end
+end
+
 ---@class Process
 ---
 --- Object to store metadata for running thread. Also the subject of self within
@@ -617,11 +629,7 @@ function M.process_spawn(func, ...)
   local prio = cur.prio
   cur.prio = cur.prio:insert()
 
-  -- TODO: optimize this: we probably could just process_resume() directly
-  push_process(cur)
-  push_process(process_new(func, args, rtbl, prio, true))
-
-  coroutine.yield()
+  process_resume(process_new(func, args, rtbl, prio, true))
 
   return rtbl
 end
@@ -793,18 +801,6 @@ function M.process_set_passive()
   if self.active then
     num_active_dec()
     self.active = false
-  end
-end
-
---- Resume execution of a process.
----@param p Process
-local function process_resume(p)
-  local prev = current_proc
-  current_proc = p
-  local ok, err = coroutine.resume(p.cont)
-  current_proc = prev
-  if not ok then
-    error(string.format("\n%s\nSSM %s:\n%s\n", err, p.cont, debug.traceback(p.cont)))
   end
 end
 
