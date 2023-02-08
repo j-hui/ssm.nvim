@@ -4,7 +4,6 @@ local M = {}
 local dbg = require("ssm.dbg")
 local Priority = require("ssm.lib.Priority")
 local PriorityQueue = require("ssm.lib.PriorityQueue")
-local Stack = require("ssm.lib.Stack")
 
 --- For compatability between Lua 5.1 and 5.2/5.3/5.4
 ---@diagnostic disable-next-line: deprecated
@@ -46,10 +45,6 @@ local current_time = 0
 ---@type Process|nil
 local current_proc = nil
 
---- Stack of queued processes (head has the highest priority).
--- @type Stack<Process>
-local run_stack = Stack()
-
 --- Priority queue of processes to run.
 -- @type PriorityQueue<Process>
 local run_queue = PriorityQueue()
@@ -85,26 +80,6 @@ local function get_running_process()
   return p
 end
 
---- Add a process structure to the run stack.
----
---- p must have a higher priority than what is at the top of the stack.
----
----@param p Process   Process structure to be queued.
-local function push_process(p)
-  if p.scheduled then
-    return
-  end
-
-  p.scheduled = true
-
-  local old_head = run_stack:peek()
-  if old_head then
-    assert(p < old_head, "Can only push higher priority process")
-  end
-
-  run_stack:push(p)
-end
-
 --- Add a process structure to the run queue.
 ---
 ---@param p Process   Process structure to be queued.
@@ -122,21 +97,7 @@ end
 ---
 ---@return Process|nil  next_process
 local function dequeue_next()
-  local p
-
-  if run_stack:is_empty() then
-    -- runStack is empty
-    p = run_queue:pop()
-  elseif run_queue:size() == 0 then
-    -- runQueue is empty
-    p = run_stack:pop()
-  elseif run_stack:peek() < run_queue:peek() then
-    -- runStack has higher priority
-    p = run_stack:pop()
-  else
-    --- runQueue has higher priority
-    p = run_queue:pop()
-  end
+  local p = run_queue:pop()
 
   if p ~= nil then
     p.scheduled = false
@@ -515,11 +476,16 @@ end
 local function process_resume(p)
   local prev = current_proc
   current_proc = p
-  local ok, err = coroutine.resume(p.cont)
-  current_proc = prev
-  if not ok then
-    error(string.format("\n%s\nSSM %s:\n%s\n", err, p.cont, debug.traceback(p.cont)))
+  local ok, ret = coroutine.resume(p.cont)
+  if ok then
+    for i=#ret,1,-1 do
+      -- Since run_after is maintained in reverse order, iterate backwards
+      process_resume(ret[i])
+    end
+  else
+    error(string.format("\n%s\nSSM %s:\n%s\n", ret, p.cont, debug.traceback(p.cont)))
   end
+  current_proc = prev
 end
 
 ---@class Process
@@ -533,6 +499,7 @@ end
 ---@field private name      string
 ---@field package active    boolean
 ---@field package scheduled boolean
+---@field package run_after Process[]
 local Process = {}
 Process.__index = Process
 
@@ -552,7 +519,13 @@ end
 ---@param active  boolean         Whether to create as an active process.
 ---@return        Process         new_process
 local function process_new(func, args, rtbl, prio, active)
-  local proc = { rtbl = rtbl, prio = prio, active = active, name = "p" .. dbg.fresh() }
+  local proc = {
+    rtbl = rtbl,
+    prio = prio,
+    active = active,
+    run_after = {},
+    name = "p" .. dbg.fresh(),
+  }
 
   -- proc becomes the self of func
   proc.cont = coroutine.create(function()
@@ -587,6 +560,7 @@ local function process_new(func, args, rtbl, prio, active)
     end
 
     pdbg("Unregistered process")
+    return proc.run_after
   end)
 
   setmetatable(proc, Process)
@@ -651,7 +625,7 @@ function M.process_defer(func, ...)
   local chan = M.make_channel_table({ terminated = false })
   local prio = cur.prio:insert()
 
-  push_process(process_new(func, args, chan, prio, true))
+  table.insert(cur.run_after, process_new(func, args, chan, prio, true))
 
   return chan
 end
@@ -723,7 +697,9 @@ function M.process_wait(...)
   while keep_waiting do
 
     dbg(tostring(cur) .. ": about to yield due to wait")
-    coroutine.yield()
+    local run_after = cur.run_after
+    cur.run_after = {}
+    coroutine.yield(run_after)
     dbg(tostring(cur) .. ": returned from yield due to wait")
 
     -- At this point, all channel tables that this process is sensitive to have
@@ -904,7 +880,7 @@ function M.set_start(entry_point, entry_args, start_time)
   -- TODO: reset process tables etc.?
   current_time = start_time or 0
   local ret = M.make_channel_table { terminated = false }
-  push_process(process_new(entry_point, entry_args or {}, ret, prio_init(), true))
+  enqueue_process(process_new(entry_point, entry_args or {}, ret, prio_init(), true))
   return ret
 end
 
